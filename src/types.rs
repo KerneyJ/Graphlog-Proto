@@ -5,10 +5,10 @@ type Key = Vec<u8>;
 type Sig = Vec<u8>;
 
 struct Reid {
-    id: Id, 
+    id: Id,
     pow: Vec<u8>,
     expiration: DateTime<Utc>,
-    sig: Sig,
+    sig: Option<Sig>,
     claims: Vec<Key>,
     anchors: Vec<String>,
     revoked: bool,
@@ -17,7 +17,7 @@ struct Reid {
 struct Endorsement {
     endorsing_id: Id,
     expiration: DateTime<Utc>,
-    sig: Sig,
+    sig: Option<Sig>,
     pow: Vec<u8>,
     endorsements: Vec<(Id, (Key, String))>,
 }
