@@ -2,16 +2,20 @@ use std::io::Write;
 use std::fs::File;
 use std::path::Path;
 
-use openssl::pkey::PKey;
-use openssl::rsa::Rsa;
+use openssl::pkey::{Id, PKey, Private, Public};
 
 fn main() {
-    let rsa = Rsa::generate(2048).unwrap();
-    let pkey = PKey::from_rsa(rsa).unwrap();
-    let pub_key_path = Path::new("rsa-pub.key");
-    let prv_key_path = Path::new("rsa-prv.key");
-    let puk_bytes: Vec<u8> = pkey.public_key_to_pem().unwrap();
-    let prk_bytes: Vec<u8> = pkey.private_key_to_pem_pkcs8().unwrap();
+    let prv_key: PKey<Private> = PKey::generate_ed25519().unwrap();
+    let pub_key_raw: Vec<u8> = prv_key.raw_public_key().unwrap();
+    let pub_key: PKey<Public> = match PKey::public_key_from_raw_bytes(&pub_key_raw, Id::ED25519) {
+        Err(why) => panic!("Couldn't convert raw public key into Pkey<Public>: {why}"),
+        Ok(pub_key) => pub_key,
+    };
+
+    let pub_key_path = Path::new("ed25519-pub.key");
+    let prv_key_path = Path::new("ed25519-prv.key");
+    let puk_bytes: Vec<u8> = pub_key.public_key_to_pem().unwrap(); 
+    let prk_bytes: Vec<u8> = prv_key.private_key_to_pem_pkcs8().unwrap();
 
     let mut pub_file = match File::create(pub_key_path) {
         Err(why) => panic!("couldn't create {}: {}", pub_key_path.display(), why),
