@@ -1,8 +1,9 @@
-use openssl::rsa::Rsa;
-use openssl::pkey::PKey;
 use std::io::Write;
 use std::fs::File;
 use std::path::Path;
+
+use openssl::pkey::PKey;
+use openssl::rsa::Rsa;
 
 fn main() {
     let rsa = Rsa::generate(2048).unwrap();

@@ -9,3 +9,4 @@ edition = "2021"
 omnipaxos = { git = "https://github.com/haraldng/omnipaxos" }
 openssl = { version = "0.10", features = ["vendored"] }
 zmq = "0.10.0"
+clap = { version = "4.0", features = ["derive"] }
