@@ -57,8 +57,11 @@ impl Reid {
     }
 
     pub fn encode(&mut self) -> String {
-        let json: String = serde_json::to_string(&self).unwrap();
-        encode_block(json.as_bytes())
+        encode_block(self.to_json().as_bytes())
+    }
+
+    pub fn to_json(&mut self) -> String {
+        serde_json::to_string(&self).unwrap()
     }
 
     pub fn update_sig(&mut self, prv_key: PKey<Private>) -> std::result::Result<Sig, ErrorStack> {
@@ -66,7 +69,7 @@ impl Reid {
     }
 
     fn sign_reid(prv_key: PKey<Private>, id: &Id, expiration: DateTime<Utc>, claims: &Option<Vec<(String, Key)>>, anchors: &Option<Vec<(String, String)>>) -> std::result::Result<Sig, openssl::error::ErrorStack> {
-        let mut signer = Signer::new(MessageDigest::sha256(), &prv_key).unwrap();
+        let mut signer = Signer::new_without_digest(&prv_key).unwrap();
         let mut reid_data: Vec<u8> = Vec::new(); // Char vector that will be signed
 
         reid_data.extend(id.clone().iter());
@@ -98,9 +101,10 @@ impl Reid {
         let exp_raw: Vec<u8> = expiration.clone().to_rfc3339().into_bytes();
         reid_data.extend(exp_raw);
 
-        if let Err(why) = signer.update(&reid_data) {
-            panic!("Signer failed somehow {why}")
+        let mut sig = vec![0u8; reid_data.len()];
+        if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
+            panic!("Signer failed {why}")
         };
-        signer.sign_to_vec()
+        Ok(sig.to_vec())
     }
 }

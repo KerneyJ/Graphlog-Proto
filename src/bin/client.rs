@@ -1,10 +1,9 @@
 use std::fs::File;
 use std::io::Read;
-
+use graphlog_proto::types::reid::Reid;
 use clap::Parser;
-
 use openssl::pkey::{PKey, Private, Public};
-
+use chrono::{DateTime, TimeDelta, Utc};
 
 #[derive(Parser)]
 struct Cli {
@@ -44,9 +43,13 @@ fn main() {
         Ok(prvkey) => prvkey,
     };
 
-    let pubk_vec: Vec<u8> = pubkey.public_key_to_pem().unwrap();
-    let prvk_vec: Vec<u8> = prvkey.private_key_to_pem_pkcs8().unwrap();
+    // if we want to print the key in pem format user below
+    // let pubk_vec: Vec<u8> = pubkey.public_key_to_pem().unwrap();
+    // let prvk_vec: Vec<u8> = prvkey.private_key_to_pem_pkcs8().unwrap();
 
-    println!("{:?}", std::str::from_utf8(pubk_vec.as_slice()).unwrap());
-    println!("{:?}", std::str::from_utf8(prvk_vec.as_slice()).unwrap());
+    // Now + 1 month;
+    let expiration: DateTime<Utc> = Utc::now() + TimeDelta::new(2628000, 0).unwrap();
+
+    let mut reid = Reid::new_with_keys(pubkey, prvkey, expiration, None, None, None, true);
+    println!("{}", reid.to_json());
 }
