@@ -1,9 +1,9 @@
+use chrono::{DateTime, TimeDelta, Utc};
+use clap::Parser;
+use graphlog_proto::types::reid::Reid;
+use openssl::pkey::{PKey, Private, Public};
 use std::fs::File;
 use std::io::Read;
-use graphlog_proto::types::reid::Reid;
-use clap::Parser;
-use openssl::pkey::{PKey, Private, Public};
-use chrono::{DateTime, TimeDelta, Utc};
 
 #[derive(Parser)]
 struct Cli {
@@ -27,8 +27,8 @@ fn main() {
     let mut pubk_raw: Vec<u8> = Vec::new();
     let mut prvk_raw: Vec<u8> = Vec::new();
 
-    if let Err(why) = pubk_file.read_to_end(&mut pubk_raw){
-       panic!("Error reading public key file: {why}");
+    if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
+        panic!("Error reading public key file: {why}");
     };
     if let Err(why) = prvk_file.read_to_end(&mut prvk_raw) {
         panic!("Error reading private key file: {why}");

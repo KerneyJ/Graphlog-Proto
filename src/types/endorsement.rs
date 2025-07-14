@@ -1,9 +1,9 @@
-use chrono::{DateTime, Utc};
+use super::common::{Id, Key, Sig};
 use chrono::serde::ts_seconds;
+use chrono::{DateTime, Utc};
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
 use openssl::sign::Signer;
-use super::common::{Id, Key, Sig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -17,11 +17,28 @@ struct Endorsement {
 }
 
 impl Endorsement {
-    pub fn new(endorsing_id: Id, expiration: DateTime<Utc>, sig: Option<Sig>, pow: Option<Vec<u8>>, endorsements: Option<Vec<(Id, (String, Key))>>) -> Self {
-        Self { endorsing_id, expiration, sig, pow, endorsements }
+    pub fn new(
+        endorsing_id: Id,
+        expiration: DateTime<Utc>,
+        sig: Option<Sig>,
+        pow: Option<Vec<u8>>,
+        endorsements: Option<Vec<(Id, (String, Key))>>,
+    ) -> Self {
+        Self {
+            endorsing_id,
+            expiration,
+            sig,
+            pow,
+            endorsements,
+        }
     }
 
-    fn sign_endorsement(prv_key: PKey<Private>, endorsing_id: &Id, expiration: DateTime<Utc>, endorsements: &Option<Vec<(Id, (String, Key))>>) -> std::result::Result<Sig, openssl::error::ErrorStack> {
+    fn sign_endorsement(
+        prv_key: PKey<Private>,
+        endorsing_id: &Id,
+        expiration: DateTime<Utc>,
+        endorsements: &Option<Vec<(Id, (String, Key))>>,
+    ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
         let mut signer = Signer::new(MessageDigest::sha256(), &prv_key).unwrap();
         let mut end_data: Vec<u8> = Vec::new();
 
@@ -40,7 +57,8 @@ impl Endorsement {
                     combined.extend(s.clone().into_bytes());
                     combined.extend(k);
                     combined
-                }).collect();
+                })
+                .collect();
             end_data.extend(endorsement_raw);
         };
 

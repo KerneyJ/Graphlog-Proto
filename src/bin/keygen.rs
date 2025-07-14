@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 
 use openssl::pkey::{Id, PKey, Private, Public};
@@ -14,7 +14,7 @@ fn main() {
 
     let pub_key_path = Path::new("ed25519-pub.key");
     let prv_key_path = Path::new("ed25519-prv.key");
-    let puk_bytes: Vec<u8> = pub_key.public_key_to_pem().unwrap(); 
+    let puk_bytes: Vec<u8> = pub_key.public_key_to_pem().unwrap();
     let prk_bytes: Vec<u8> = prv_key.private_key_to_pem_pkcs8().unwrap();
 
     let mut pub_file = match File::create(pub_key_path) {
