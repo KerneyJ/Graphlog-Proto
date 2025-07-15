@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use clap::Parser;
+use curl::easy::{Easy, List};
 use graphlog_proto::types::reid::Reid;
 use openssl::pkey::{PKey, Private, Public};
 use std::fs::File;
@@ -56,4 +57,36 @@ fn main() {
         reid.to_json(),
         reid.verify_sig(&pub_key)
     );
+
+    // set Url
+    let mut easy = Easy::new();
+    easy.url("http://127.0.0.1:7878").unwrap();
+
+    /* // GET request
+    easy.write_function(|data| {
+        println!("{data:?}");
+        Ok(data.len())
+    }).unwrap();
+    easy.perform().unwrap();*/
+
+    // Set Headers
+    let mut headers  = List::new();
+    headers.append("User-Agent: curl/8.14.1").unwrap();
+    headers.append("Content-Type: application/json").unwrap();
+    easy.http_headers(headers).unwrap();
+
+    // Set POST data
+    let data = r#"{"key": "something"}"#;
+    // Note, this copies data into libcurl internal
+    // buffer so we may want use easy.post_field_size()
+    // and Read implementation - ChatGPT. Though I think
+    // that they data that we are sending around is
+    easy.post_fields_copy(data.as_bytes()).unwrap();
+
+    // Perform request
+    easy.perform().unwrap();
+
+    // check response code
+    let response_code = easy.response_code().unwrap();
+    println!("Response code: {response_code}");
 }
