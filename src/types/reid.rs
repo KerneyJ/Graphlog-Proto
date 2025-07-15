@@ -136,7 +136,7 @@ impl Reid {
     ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
         let mut signer = Signer::new_without_digest(prv_key).unwrap();
         let reid_data: Vec<u8> = Reid::args_to_signable(id, expiration, claims, anchors); // Char vector that will be signed
-        let mut sig = vec![0u8; reid_data.len()];
+        let mut sig = vec![0u8; Signer::len(&signer).unwrap()];
         if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
             panic!("Signer failed {why}")
         };
