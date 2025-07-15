@@ -16,7 +16,10 @@ impl ThreadPool {
         let mut workers = Vec::with_capacity(size);
 
         for id in 0..size {
-            workers.push(Worker::new(id, Arc::clone(&receiver)));
+            match Worker::new(id, Arc::clone(&receiver)) {
+                Err(why) => println!("Failed to create worker {id} because {why}"),
+                Ok(worker) => workers.push(worker),
+            }
         }
 
         Self {
@@ -55,8 +58,8 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
-        let thread = thread::spawn(move || loop {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Result<Worker, std::io::Error> {
+        let thread = thread::Builder::new().name(format!("Worker-{id}")).spawn(move || loop {
             let msg = receiver.lock().unwrap().recv();
             match msg {
                 Ok(job) => {
@@ -69,9 +72,10 @@ impl Worker {
                 }
             }
         });
-        Worker {
-            id,
-            thread: Some(thread),
+
+        match thread {
+            Ok(thread) => Ok(Worker { id, thread: Some(thread) }),
+            Err(_) => Err(std::io::Error::last_os_error()),
         }
     }
 }
