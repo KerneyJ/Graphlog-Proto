@@ -1,6 +1,6 @@
+use graphlog_proto::utils::threadpool::ThreadPool;
 use std::io::{prelude::*, BufReader};
 use std::net::{TcpListener, TcpStream};
-use graphlog_proto::utils::threadpool::ThreadPool;
 
 fn main() {
     let listener = match TcpListener::bind("127.0.0.1:7878") {
@@ -12,7 +12,7 @@ fn main() {
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
-        
+
         pool.execute(|| {
             handle_connection(stream);
         });
