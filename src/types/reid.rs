@@ -1,7 +1,9 @@
 use super::common::{Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
+use omnipaxos::macros::Entry;
 use openssl::base64::encode_block;
+use openssl::sign::Verifier;
 use openssl::{
     error::ErrorStack,
     hash::{Hasher, MessageDigest},
@@ -10,7 +12,7 @@ use openssl::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug, Entry)]
 pub struct Reid {
     id: Id,               // Hash of public key
     pow: Option<Vec<u8>>, // proof of work, optionally required by the log
@@ -44,8 +46,8 @@ impl Reid {
     }
 
     pub fn new_with_keys(
-        pub_key: PKey<Public>,
-        prv_key: PKey<Private>,
+        pub_key: &PKey<Public>,
+        prv_key: &PKey<Private>,
         expiration: DateTime<Utc>,
         pow: Option<Vec<u8>>,
         claims: Option<Vec<(String, Key)>>,
@@ -69,7 +71,8 @@ impl Reid {
             Ok(id) => id.to_vec(),
         };
 
-        let sig: Sig = match Reid::sign_reid(prv_key, &id, expiration, &claims, &anchors) {
+        let sig: Sig = match Reid::sign_reid_with_args(prv_key, &id, expiration, &claims, &anchors)
+        {
             Err(why) => panic!("Signing Reid failed: {why}"),
             Ok(sig) => sig,
         };
@@ -107,27 +110,57 @@ impl Reid {
         serde_json::to_string(&self).unwrap()
     }
 
-    pub fn update_sig(&mut self, prv_key: PKey<Private>) -> std::result::Result<Sig, ErrorStack> {
-        Reid::sign_reid(
-            prv_key,
-            &self.id,
-            self.expiration,
-            &self.claims,
-            &self.anchors,
-        )
+    pub fn update_sig(&mut self, prv_key: &PKey<Private>) -> std::result::Result<Sig, ErrorStack> {
+        Reid::sign_reid(prv_key, self)
     }
 
     fn sign_reid(
-        prv_key: PKey<Private>,
+        prv_key: &PKey<Private>,
+        reid: &Reid,
+    ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
+        let mut signer = Signer::new_without_digest(&prv_key).unwrap();
+        let reid_data: Vec<u8> = Reid::reid_to_signable(reid); // Char vector that will be signed
+        let mut sig = vec![0u8; reid_data.len()];
+        if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
+            panic!("Signer failed {why}")
+        };
+        Ok(sig.to_vec())
+    }
+
+    fn sign_reid_with_args(
+        prv_key: &PKey<Private>,
         id: &Id,
         expiration: DateTime<Utc>,
         claims: &Option<Vec<(String, Key)>>,
         anchors: &Option<Vec<(String, String)>>,
     ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
-        let mut signer = Signer::new_without_digest(&prv_key).unwrap();
-        let mut reid_data: Vec<u8> = Vec::new(); // Char vector that will be signed
+        let mut signer = Signer::new_without_digest(prv_key).unwrap();
+        let reid_data: Vec<u8> = Reid::args_to_signable(id, expiration, claims, anchors); // Char vector that will be signed
+        let mut sig = vec![0u8; reid_data.len()];
+        if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
+            panic!("Signer failed {why}")
+        };
+        Ok(sig.to_vec())
+    }
 
-        reid_data.extend(id.clone().iter());
+    pub fn verify_sig(&mut self, pub_key: &PKey<Public>) -> bool {
+        let mut verify = Verifier::new_without_digest(pub_key).unwrap();
+        let data: Vec<u8> = Reid::reid_to_signable(self);
+        verify.verify_oneshot(&self.sig, &data).unwrap()
+    }
+
+    fn reid_to_signable(reid: &Reid) -> Vec<u8> {
+        Reid::args_to_signable(&reid.id, reid.expiration, &reid.claims, &reid.anchors)
+    }
+
+    fn args_to_signable(
+        id: &Id,
+        expiration: DateTime<Utc>,
+        claims: &Option<Vec<(String, Key)>>,
+        anchors: &Option<Vec<(String, String)>>,
+    ) -> Vec<u8> {
+        let mut data: Vec<u8> = Vec::new();
+        data.extend(id.clone().iter());
 
         let claims_clone: Option<Vec<(String, Key)>> = claims.clone();
         if let Some(claim_val) = claims_clone {
@@ -139,7 +172,7 @@ impl Reid {
                     combined
                 })
                 .collect();
-            reid_data.extend(claim_raw);
+            data.extend(claim_raw);
         }
 
         let anchors_clone: Option<Vec<(String, String)>> = anchors.clone();
@@ -152,16 +185,11 @@ impl Reid {
                     combined
                 })
                 .collect();
-            reid_data.extend(anchor_raw);
+            data.extend(anchor_raw);
         }
 
         let exp_raw: Vec<u8> = expiration.clone().to_rfc3339().into_bytes();
-        reid_data.extend(exp_raw);
-
-        let mut sig = vec![0u8; reid_data.len()];
-        if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
-            panic!("Signer failed {why}")
-        };
-        Ok(sig.to_vec())
+        data.extend(exp_raw);
+        data
     }
 }

@@ -34,13 +34,13 @@ fn main() {
         panic!("Error reading private key file: {why}");
     };
 
-    let pubkey: PKey<Public> = match PKey::public_key_from_pem(&pubk_raw) {
+    let pub_key: PKey<Public> = match PKey::public_key_from_pem(&pubk_raw) {
         Err(why) => panic!("Couldn't load public key from bytes, reason: {why}"),
-        Ok(pubkey) => pubkey,
+        Ok(pub_key) => pub_key,
     };
-    let prvkey: PKey<Private> = match PKey::private_key_from_pem(&prvk_raw) {
+    let prv_key: PKey<Private> = match PKey::private_key_from_pem(&prvk_raw) {
         Err(why) => panic!("Couldn't load private key from bytes, reason: {why}"),
-        Ok(prvkey) => prvkey,
+        Ok(prv_key) => prv_key,
     };
 
     // if we want to print the key in pem format user below
@@ -50,6 +50,10 @@ fn main() {
     // Now + 1 month;
     let expiration: DateTime<Utc> = Utc::now() + TimeDelta::new(2628000, 0).unwrap();
 
-    let mut reid = Reid::new_with_keys(pubkey, prvkey, expiration, None, None, None, true);
-    println!("{}", reid.to_json());
+    let mut reid = Reid::new_with_keys(&pub_key, &prv_key, expiration, None, None, None, true);
+    println!(
+        "{}\nIs valid: {}",
+        reid.to_json(),
+        reid.verify_sig(&pub_key)
+    );
 }
