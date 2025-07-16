@@ -87,12 +87,26 @@ fn handle_connection(mut stream: TcpStream, mut log: Arc<Mutex<Log<Reid>>>) {
             println!("Recieved content_type: {content_type} that is not yet handled");
             return;
         }
+        let response = "HTTP/1.1 200 OK\r\n\r\n";
+        stream.write_all(response.as_bytes()).unwrap();
     } else if request_type == "GET / HTTP/1.1" {
         println!("received a get request");
+        let reid_b64: String = log.lock().unwrap().head().clone().encode();
+        let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
+        let response: String = format!(
+            "HTTP/1.1 200 OK\r\n
+             Content-Type: application/json\r\n
+             Content-Length: {}\r\n
+             Connection: close\r\n
+             \r\n
+             {}",
+            response_body.len(),
+            response_body,
+        );
+        stream.write_all(response.as_bytes()).unwrap();
     } else {
         println!("No handler for request: {request_type:#?}");
+        let response = "HTTP/1.1 200 OK\r\n\r\n";
+        stream.write_all(response.as_bytes()).unwrap();
     }
-
-    let response = "HTTP/1.1 200 OK\r\n\r\n";
-    stream.write_all(response.as_bytes()).unwrap();
 }

@@ -12,4 +12,8 @@ impl<T> Log<T> {
     pub fn append(&mut self, val: T) {
         self._log.push(val);
     }
+
+    pub fn head(&mut self) -> &T {
+        self._log.last().unwrap()
+    }
 }
