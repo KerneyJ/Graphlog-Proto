@@ -81,7 +81,8 @@ fn handle_connection(mut stream: TcpStream, mut log: Arc<Mutex<Log<Reid>>>) {
             let reid_b64: String = reid_json.reid;
             let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
             let reid: Reid = serde_json::from_str(&reid_raw).unwrap();
-            println!("Unpacked reid: {reid:#?}");
+            log.lock().unwrap().append(reid);
+            println!("Pushed reid to log");
         } else {
             println!("Recieved content_type: {content_type} that is not yet handled");
             return;
