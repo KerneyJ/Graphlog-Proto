@@ -70,13 +70,13 @@ fn main() {
     easy.perform().unwrap();*/
 
     // Set Headers
-    let mut headers  = List::new();
+    let mut headers = List::new();
     headers.append("User-Agent: curl/8.14.1").unwrap();
     headers.append("Content-Type: application/json").unwrap();
     easy.http_headers(headers).unwrap();
 
     // Set POST data
-    let data = r#"{"key": "something"}"#;
+    let data = format!("{{\"reid\": \"{}\"}}", reid.encode());
     // Note, this copies data into libcurl internal
     // buffer so we may want use easy.post_field_size()
     // and Read implementation - ChatGPT. Though I think

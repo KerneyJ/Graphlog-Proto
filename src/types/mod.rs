@@ -1,3 +1,4 @@
 pub mod common;
-pub mod reid;
 pub mod endorsement;
+pub mod log;
+pub mod reid;
