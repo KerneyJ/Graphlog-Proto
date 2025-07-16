@@ -3,11 +3,11 @@ pub type Key = Vec<u8>;
 pub type Sig = Vec<u8>;
 
 // AT => ANCHOR_TYPE
-static AT_DNS: &str = "DNS";
-static AT_EMAIL: &str = "EMAIL";
-static AT_PHONE: &str = "PHONE";
-static AT_ADDRESS: &str = "ADDRESS";
+pub static AT_DNS: &str = "DNS";
+pub static AT_EMAIL: &str = "EMAIL";
+pub static AT_PHONE: &str = "PHONE";
+pub static AT_IPADDR: &str = "IP-ADDR";
 
 // CLMT => CLAIM_TYPE
-static CLMT_SSHKEY: &str = "SSHKEY";
-static CLMT_X509: &str = "X509";
+pub static CLMT_SSHKEY: &str = "SSHKEY";
+pub static CLMT_X509: &str = "X509";
