@@ -4,7 +4,7 @@ use super::common::{Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
-use openssl::base64::{decode_block, encode_block};
+use openssl::base64::{self, decode_block, encode_block};
 use openssl::sign::Verifier;
 use openssl::{
     error::ErrorStack,
@@ -13,6 +13,7 @@ use openssl::{
     sign::Signer,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Entry)]
 pub struct Reid {
@@ -104,7 +105,6 @@ impl Reid {
         }
 
         let content_str: &String = header.last().unwrap();
-        println!("Content string in reid.rs: {content_str:?}");
         let reid_json: ReidMessage = serde_json::from_str(content_str).unwrap();
         let reid_b64: String = reid_json.reid;
         let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
@@ -147,7 +147,7 @@ impl Reid {
         prv_key: &PKey<Private>,
         reid: &Reid,
     ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
-        let mut signer = Signer::new_without_digest(&prv_key).unwrap();
+        let mut signer = Signer::new_without_digest(prv_key).unwrap();
         let reid_data: Vec<u8> = Reid::reid_to_signable(reid); // Char vector that will be signed
         let mut sig = vec![0u8; reid_data.len()];
         if let Err(why) = signer.sign_oneshot(&mut sig, &reid_data) {
@@ -220,5 +220,55 @@ impl Reid {
         let exp_raw: Vec<u8> = expiration.clone().to_rfc3339().into_bytes();
         data.extend(exp_raw);
         data
+    }
+}
+
+impl fmt::Display for Reid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // id
+        writeln!(f, "id: {}", encode_block(&self.id))?;
+
+        // pow
+        match &self.pow {
+            Some(pow) => writeln!(f, "pow: {}", encode_block(pow))?,
+            None => writeln!(f, "pow: None")?,
+        }
+
+        // expiration
+        writeln!(f, "expiration: {}", self.expiration.to_rfc3339())?;
+
+        // sig
+        writeln!(f, "sig: {}", encode_block(&self.sig))?;
+
+        // claims
+        writeln!(f, "claims:")?;
+        match &self.claims {
+            Some(claims) => {
+                for (name, key) in claims {
+                    writeln!(f, "- {}: {}", name, encode_block(key))?;
+                }
+            }
+            None => writeln!(f, "None")?,
+        }
+
+        // anchors
+        writeln!(f, "anchors:")?;
+        match &self.anchors {
+            Some(anchors) => {
+                for (name, value) in anchors {
+                    writeln!(f, "- {}: {}", name, value)?;
+                }
+            }
+            None => writeln!(f, "None")?,
+        }
+
+        // revoked
+        writeln!(
+            f,
+            "revoked: {}",
+            if self.revoked { "True" } else { "False" }
+        )?;
+
+        Ok(())
     }
 }

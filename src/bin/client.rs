@@ -152,7 +152,7 @@ fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option
     };
 
     Some(Reid::new_with_keys(
-        &pub_key, &prv_key, expiration, None, None, None, true,
+        &pub_key, &prv_key, expiration, None, None, None, false,
     ))
 }
 
@@ -334,7 +334,7 @@ fn get_tail(log_addr: String) {
     easy.write_function(|data| {
         let response: Vec<String> = _format_get(data);
         let reid = Reid::new_from_header(response);
-        println!("{reid:?}");
+        println!("{}", reid.unwrap());
         Ok(data.len())
     })
     .unwrap();
