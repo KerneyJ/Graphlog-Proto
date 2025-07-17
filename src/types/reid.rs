@@ -1,8 +1,10 @@
+use crate::utils::http_server::ReidMessage;
+
 use super::common::{Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
-use openssl::base64::encode_block;
+use openssl::base64::{decode_block, encode_block};
 use openssl::sign::Verifier;
 use openssl::{
     error::ErrorStack,
@@ -85,6 +87,33 @@ impl Reid {
             claims,
             anchors,
             revoked,
+        }
+    }
+
+    pub fn new_from_header(header: Vec<String>) -> Option<Self> {
+        let content_type: String = match header.iter().find(|s| s.contains("Content-Type: ")) {
+            Some(found) => found.strip_prefix("Content-Type: ").unwrap().to_string(),
+            None => {
+                println!("Error Couldn't find content-type in request handler");
+                return None;
+            }
+        };
+        if content_type != "application/json" {
+            println!("Error received content of type for which there is no handler");
+            return None;
+        }
+
+        let content_str: &String = header.last().unwrap();
+        println!("Content string in reid.rs: {content_str:?}");
+        let reid_json: ReidMessage = serde_json::from_str(content_str).unwrap();
+        let reid_b64: String = reid_json.reid;
+        let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
+        match serde_json::from_str(&reid_raw) {
+            Err(why) => {
+                println!("Error deserializing reid json string: {why}");
+                None
+            }
+            Ok(reid) => reid,
         }
     }
 

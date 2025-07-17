@@ -14,6 +14,10 @@ impl<T> Log<T> {
     }
 
     pub fn head(&mut self) -> &T {
+        self._log.first().unwrap()
+    }
+
+    pub fn tail(&mut self) -> &T {
         self._log.last().unwrap()
     }
 }

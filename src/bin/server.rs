@@ -89,9 +89,19 @@ fn handle_connection(mut stream: TcpStream, mut log: Arc<Mutex<Log<Reid>>>) {
         }
         let response = "HTTP/1.1 200 OK\r\n\r\n";
         stream.write_all(response.as_bytes()).unwrap();
-    } else if request_type == "GET / HTTP/1.1" {
+    } else if request_type == "GET /tail HTTP/1.1" {
         println!("received a get request");
         let reid_b64: String = log.lock().unwrap().head().clone().encode();
+        let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
+        let response: String = format!(
+            "HTTP/1.1 200 OK\r\n\nContent-Type: application/json\r\n\nContent-Length: {}\r\n\nConnection: close\r\n\n\r\n\n{}",
+            response_body.len(),
+            response_body,
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_type == "GET /head HTTP/1.1" {
+        println!("received a get request");
+        let reid_b64: String = log.lock().unwrap().tail().clone().encode();
         let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
         let response: String = format!(
             "HTTP/1.1 200 OK\r\n

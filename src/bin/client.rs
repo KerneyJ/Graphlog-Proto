@@ -24,11 +24,12 @@ fn main() {
 
     let (pub_key, prv_key) = extract_keys_from_file(args);
     let cli_options = &[
-        "Create Reid",
-        "Update Reid",
-        "Post Reid",
+        "Create User Reid",
+        "Update User Reid",
+        "Post User Reid to Log",
         "Get Tail Reid",
         "Look Up Id",
+        "Display User Reid",
         "Exit",
     ];
     let mut reid: Option<Reid> = None;
@@ -41,6 +42,7 @@ fn main() {
             .unwrap();
         match selection {
             0 => {
+                // Create Reid
                 let r: &mut Option<Reid> = &mut reid;
                 if r.is_none() {
                     *r = create_reid_from_key(pub_key.clone(), prv_key.clone());
@@ -49,6 +51,7 @@ fn main() {
                 }
             }
             1 => {
+                // Update Reid
                 let r: &mut Option<Reid> = &mut reid;
                 if r.is_none() {
                     println!("Reid not yet created");
@@ -57,11 +60,12 @@ fn main() {
                 *r = update_reid(r.take());
             }
             2 => {
+                // Post Reid to log
                 let l: &mut Option<String> = &mut log_addr;
                 if let Some(r) = &reid {
                     if l.is_none() {
                         let input: String = Input::new()
-                            .with_prompt("Enter an ip address")
+                            .with_prompt("Enter the Log's ip address/domain")
                             .interact_text()
                             .unwrap();
                         *l = Some(input);
@@ -74,8 +78,22 @@ fn main() {
                     continue;
                 }
             }
-            3 => get_tail(),
+            3 => {
+                // Get tail Reid
+                if let Some(l) = &log_addr {
+                    get_tail(l.to_string())
+                } else {
+                    let input: String = Input::new()
+                        .with_prompt("Enter the Log's ip address/domain")
+                        .interact_text()
+                        .unwrap();
+                    let l: &mut Option<String> = &mut log_addr;
+                    *l = Some(input);
+                    get_tail(l.as_ref().unwrap().to_string())
+                }
+            }
             4 => look_up_reid(),
+            5 => display_reid(),
             _ => break,
         }
     }
@@ -122,7 +140,7 @@ fn extract_keys_from_file(args: Cli) -> (PKey<Public>, PKey<Private>) {
 
 fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option<Reid> {
     let input: String = Input::new()
-        .with_prompt("Enter an expiration date")
+        .with_prompt("Enter an expiration date(e.g. 2025-07-16 15:00")
         .interact_text()
         .unwrap();
     let expiration: DateTime<Utc> = match _parse_datetime(&input) {
@@ -157,6 +175,8 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
 }
 
 fn update_reid(reid: Option<Reid>) -> Option<Reid> {
+    // In this function I don't understand why I need clones
+    // on the next line and at all return statements
     let r: &mut Reid = &mut reid.unwrap().clone();
     let sub_options = &["Append Claim", "Append Anchor"];
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -299,13 +319,34 @@ fn post_reid(log_addr: String, reid: &Reid) {
     println!("Response code: {response_code}");
 }
 
-fn get_tail() {
-    /* // GET request
+fn get_tail(log_addr: String) {
+    // Set Url
+    let mut easy = Easy::new();
+    let endpoint: String = format!("http://{log_addr}/tail");
+    easy.url(&endpoint).unwrap();
+
+    // Set Headers
+    let mut headers = List::new();
+    headers.append("User-Agent: curl/8.14.1").unwrap();
+    headers.append("Content-Type: application/json").unwrap();
+    easy.http_headers(headers).unwrap();
+
     easy.write_function(|data| {
-        println!("{data:?}");
+        let response: Vec<String> = _format_get(data);
+        let reid = Reid::new_from_header(response);
+        println!("{reid:?}");
         Ok(data.len())
-    }).unwrap();
-    easy.perform().unwrap();*/
+    })
+    .unwrap();
+    easy.perform().unwrap();
 }
 
 fn look_up_reid() {}
+
+fn _format_get(raw: &[u8]) -> Vec<String> {
+    let raw_vec: Vec<u8> = raw.to_vec();
+    let raw_str: String = String::from_utf8(raw_vec).unwrap();
+    raw_str.split("\r\n\n").map(|s| s.to_string()).collect()
+}
+
+fn display_reid() {}
