@@ -20,7 +20,7 @@ use openssl::base64::decode_block;
 
 fn main() {
     let addr_port: String = Input::new()
-        .with_prompt("Enter an expiration date")
+        .with_prompt("Enter IP address to bind to")
         .default(String::from("127.0.0.1:7878"))
         .interact_text()
         .unwrap();
