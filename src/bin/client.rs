@@ -81,7 +81,7 @@ fn main() {
             3 => {
                 // Get tail Reid
                 if let Some(l) = &log_addr {
-                    get_tail(l.to_string())
+                    get_tail(l.to_string());
                 } else {
                     let input: String = Input::new()
                         .with_prompt("Enter the Log's ip address/domain")
@@ -89,11 +89,29 @@ fn main() {
                         .unwrap();
                     let l: &mut Option<String> = &mut log_addr;
                     *l = Some(input);
-                    get_tail(l.as_ref().unwrap().to_string())
+                    get_tail(l.as_ref().unwrap().to_string());
                 }
             }
-            4 => look_up_reid(),
-            5 => display_reid(),
+            4 => {
+                // Look Up Reid given an Id
+                let l: &mut Option<String> = &mut log_addr;
+                if l.is_none() {
+                    let input: String = Input::new()
+                        .with_prompt("Enter the Log's ip address/domain")
+                        .interact_text()
+                        .unwrap();
+                    *l = Some(input);
+                    look_up_reid(l.clone().unwrap());
+                } else {
+                    look_up_reid(l.clone().unwrap());
+                }
+            }
+            5 => {
+                // Display the Curent user's Reid
+                if let Some(r) = &reid {
+                    println!("{r}");
+                }
+            }
             _ => break,
         }
     }
@@ -140,7 +158,8 @@ fn extract_keys_from_file(args: Cli) -> (PKey<Public>, PKey<Private>) {
 
 fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option<Reid> {
     let input: String = Input::new()
-        .with_prompt("Enter an expiration date(e.g. 2025-07-16 15:00")
+        .with_prompt("Enter an expiration date")
+        .default(String::from("2026-07-16 12:00"))
         .interact_text()
         .unwrap();
     let expiration: DateTime<Utc> = match _parse_datetime(&input) {
@@ -341,12 +360,44 @@ fn get_tail(log_addr: String) {
     easy.perform().unwrap();
 }
 
-fn look_up_reid() {}
+fn look_up_reid(log_addr: String) {
+    let id_b64: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter base64 encoded Id")
+        .interact()
+        .unwrap();
+
+    // set Url
+    let mut easy = Easy::new();
+    let endpoint: String = format!("http://{log_addr}/look_up");
+    easy.url(&endpoint).unwrap();
+
+    // Set Headers
+    let mut headers = List::new();
+    headers.append("User-Agent: curl/8.14.1").unwrap();
+    headers.append("Content-Type: application/json").unwrap();
+    easy.http_headers(headers).unwrap();
+
+    // Set POST data
+    let data = format!("{{\"id_b64\": \"{id_b64}\"}}");
+    // Note, this copies data into libcurl internal
+    // buffer so we may want use easy.post_field_size()
+    // and Read implementation - ChatGPT. Though I think
+    // that they data that we are sending around is
+    easy.post_fields_copy(data.as_bytes()).unwrap();
+
+    easy.write_function(|data| {
+        let response: Vec<String> = _format_get(data);
+        let reid = Reid::new_from_header(response);
+        println!("{}", reid.unwrap());
+        Ok(data.len())
+    })
+    .unwrap();
+    // Perform request
+    easy.perform().unwrap();
+}
 
 fn _format_get(raw: &[u8]) -> Vec<String> {
     let raw_vec: Vec<u8> = raw.to_vec();
     let raw_str: String = String::from_utf8(raw_vec).unwrap();
     raw_str.split("\r\n\n").map(|s| s.to_string()).collect()
 }
-
-fn display_reid() {}

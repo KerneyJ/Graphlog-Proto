@@ -20,4 +20,11 @@ impl<T> Log<T> {
     pub fn tail(&mut self) -> &T {
         self._log.last().unwrap()
     }
+
+    pub fn search<P>(&mut self, mut predicate: P) -> Option<&T>
+    where
+        P: FnMut(&T) -> bool,
+    {
+        self._log.iter().find(|x| predicate(*x))
+    }
 }

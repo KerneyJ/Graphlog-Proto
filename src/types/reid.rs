@@ -4,7 +4,7 @@ use super::common::{Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
-use openssl::base64::{self, decode_block, encode_block};
+use openssl::base64::{decode_block, encode_block};
 use openssl::sign::Verifier;
 use openssl::{
     error::ErrorStack,
@@ -17,7 +17,7 @@ use std::fmt;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Entry)]
 pub struct Reid {
-    id: Id,               // Hash of public key
+    pub id: Id,           // Hash of public key
     pow: Option<Vec<u8>>, // proof of work, optionally required by the log
     #[serde(with = "ts_seconds")]
     expiration: DateTime<Utc>, // datetime wherein which the record expires
@@ -131,12 +131,16 @@ impl Reid {
             .push((key_type, key_value));
     }
 
-    pub fn encode(&mut self) -> String {
+    pub fn encode(&self) -> String {
         encode_block(self.to_json().as_bytes())
     }
 
-    pub fn to_json(&mut self) -> String {
+    pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap()
+    }
+
+    pub fn get_id(&self) -> Id {
+        self.id.clone()
     }
 
     pub fn update_sig(&mut self, prv_key: &PKey<Private>) -> std::result::Result<Sig, ErrorStack> {

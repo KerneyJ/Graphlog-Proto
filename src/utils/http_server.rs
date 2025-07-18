@@ -10,6 +10,11 @@ pub struct ReidMessage {
     pub reid: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct IdMessage {
+    pub id_b64: String,
+}
+
 pub struct HttpServer {
     listener: TcpListener,
     pool: ThreadPool,
