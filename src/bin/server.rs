@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use dialoguer::Input;
+
 use graphlog_proto::utils::http_server::HttpServer;
 use graphlog_proto::{types::log::Log, utils::http_server::ReidMessage};
 use graphlog_proto::{
@@ -17,7 +19,11 @@ use graphlog_proto::{
 use openssl::base64::decode_block;
 
 fn main() {
-    let addr_port = String::from("127.0.0.1:7878");
+    let addr_port: String = Input::new()
+        .with_prompt("Enter an expiration date")
+        .default(String::from("127.0.0.1:7878"))
+        .interact_text()
+        .unwrap();
     let log = Arc::new(Mutex::new(Log::new()));
     let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
     http_server.run(log);
