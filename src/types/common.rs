@@ -2,6 +2,14 @@ pub type Id = Vec<u8>;
 pub type Key = Vec<u8>;
 pub type Sig = Vec<u8>;
 
+pub trait Encodable {
+    fn encode(&self) -> String;
+}
+
+pub trait Decodable<T> {
+    fn decode(b64: &str) -> Option<T>;
+}
+
 // AT => ANCHOR_TYPE
 pub static AT_DNS: &str = "DNS";
 pub static AT_EMAIL: &str = "EMAIL";

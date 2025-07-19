@@ -1,6 +1,7 @@
+use crate::types::common::Decodable;
 use crate::utils::http_server::ReidMessage;
 
-use super::common::{Id, Key, Sig};
+use super::common::{Encodable, Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
@@ -117,8 +118,6 @@ impl Reid {
         }
     }
 
-    // pub fn new_from_decode;
-
     pub fn append_anchor(&mut self, anchor_type: String, anchor_value: String) {
         self.anchors
             .get_or_insert_with(Vec::new)
@@ -129,10 +128,6 @@ impl Reid {
         self.claims
             .get_or_insert_with(Vec::new)
             .push((key_type, key_value));
-    }
-
-    pub fn encode(&self) -> String {
-        encode_block(self.to_json().as_bytes())
     }
 
     pub fn to_json(&self) -> String {
@@ -224,6 +219,40 @@ impl Reid {
         let exp_raw: Vec<u8> = expiration.clone().to_rfc3339().into_bytes();
         data.extend(exp_raw);
         data
+    }
+}
+
+impl Encodable for Reid {
+    fn encode(&self) -> String {
+        encode_block(self.to_json().as_bytes())
+    }
+}
+
+impl Decodable<Reid> for Reid {
+    fn decode(reid_b64: &str) -> Option<Reid> {
+        let reid_vec: Vec<u8> = match decode_block(reid_b64) {
+            Err(why) => {
+                println!("Error decoding reid base64: {why}");
+                return None;
+            }
+            Ok(vec) => vec,
+        };
+        let reid_json: String = match String::from_utf8(reid_vec) {
+            Err(why) => {
+                // TODO should analyze deocode_block from openssl
+                // because I think this should be impossible
+                println!("Error parsing decoded base64 vector into string: {why}");
+                return None;
+            }
+            Ok(str) => str,
+        };
+        match serde_json::from_str(&reid_json) {
+            Err(why) => {
+                println!("Error decoding reid_json into Reid object: {why}");
+                return None;
+            }
+            Ok(reid) => reid,
+        }
     }
 }
 

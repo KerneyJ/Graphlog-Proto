@@ -10,7 +10,7 @@ use graphlog_proto::utils::http_server::HttpServer;
 use graphlog_proto::{types::log::Log, utils::http_server::ReidMessage};
 use graphlog_proto::{
     types::{
-        common::{id_equal, Id},
+        common::{id_equal, Encodable, Id},
         reid::Reid,
     },
     utils::http_server::IdMessage,
@@ -24,9 +24,23 @@ fn main() {
         .default(String::from("127.0.0.1:7878"))
         .interact_text()
         .unwrap();
-    let log = Arc::new(Mutex::new(Log::new()));
-    let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
-    http_server.run(log);
+    let persist_file: Option<String> = Input::new()
+        .with_prompt("Enter the compelte file path to persist the log")
+        .allow_empty(true)
+        .interact_text()
+        .ok()
+        .filter(|s: &String| !s.trim().is_empty());
+    // TODO make this cleaner, I know there is a much better way
+    // organize this code, probably change log.rs too
+    if let Some(path) = persist_file {
+        let log = Arc::new(Mutex::new(Log::new_from_file(path)));
+        let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
+        http_server.run(log);
+    } else {
+        let log = Arc::new(Mutex::new(Log::new(persist_file)));
+        let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
+        http_server.run(log);
+    }
 }
 
 fn handle_connection(mut stream: TcpStream, log: Arc<Mutex<Log<Reid>>>) {
