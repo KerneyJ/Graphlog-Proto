@@ -33,6 +33,16 @@ impl Endorsement {
         }
     }
 
+    fn args_to_signable () {
+        // TODO Implement: move the logic for converting the
+        // data into a signable format into this funciton then
+        // create a sign and verify funciton that calls this funciton
+        // similar to the patterin reid.rs
+    }
+
+    pub fn verify_sig() {
+    }
+
     fn sign_endorsement(
         prv_key: PKey<Private>,
         endorsing_id: &Id,
@@ -55,7 +65,8 @@ impl Endorsement {
                     let mut combined = Vec::new();
                     combined.extend(i);
                     combined.extend(s.clone().into_bytes());
-                    combined.extend(k);
+                    combined.extend(k.0.clone().into_bytes()); // Key type
+                    combined.extend(k.1.clone().into_bytes()); // Key value
                     combined
                 })
                 .collect();

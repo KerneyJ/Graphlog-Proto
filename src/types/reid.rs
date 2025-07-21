@@ -1,7 +1,7 @@
-use crate::types::common::Decodable;
+use crate::types::common::KT_ED25519;
 use crate::utils::http_server::ReidMessage;
 
-use super::common::{Encodable, Id, Key, Sig};
+use super::common::{Encodable, Decodable, Id, Key, Sig};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
@@ -134,6 +134,17 @@ impl Reid {
         serde_json::to_string(&self).unwrap()
     }
 
+    pub fn key_to_pem(key: &Key) -> String {
+        let key_value: &String = &key.1;
+        if key.0 == KT_ED25519 {
+            key_value.clone()
+        }
+        else {
+            println!("Displaying unsupported key type, using base64");
+            encode_block(key_value.as_bytes())
+        }
+    }
+
     pub fn get_id(&self) -> Id {
         self.id.clone()
     }
@@ -196,7 +207,8 @@ impl Reid {
                 .into_iter()
                 .flat_map(|(s, k)| {
                     let mut combined = s.into_bytes();
-                    combined.extend(k);
+                    combined.extend(k.0.clone().into_bytes());
+                    combined.extend(k.1.clone().into_bytes());
                     combined
                 })
                 .collect();
@@ -249,7 +261,7 @@ impl Decodable<Reid> for Reid {
         match serde_json::from_str(&reid_json) {
             Err(why) => {
                 println!("Error decoding reid_json into Reid object: {why}");
-                return None;
+                None
             }
             Ok(reid) => reid,
         }
@@ -278,7 +290,7 @@ impl fmt::Display for Reid {
         match &self.claims {
             Some(claims) => {
                 for (name, key) in claims {
-                    writeln!(f, "- {}: {}", name, encode_block(key))?;
+                    writeln!(f, "- {}: {}", name, Reid::key_to_pem(key))?;
                 }
             }
             None => writeln!(f, "None")?,

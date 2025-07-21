@@ -207,7 +207,7 @@ fn update_reid(reid: Option<Reid>) -> Option<Reid> {
         0 => {
             // Append claim
             if let Some((claim_type, claim_value)) = _get_claim() {
-                r.append_claim(claim_type, claim_value.into_bytes());
+                r.append_claim(claim_type, claim_value);
                 Some(r.clone())
             } else {
                 println!("Getting claim type failed");
@@ -228,7 +228,7 @@ fn update_reid(reid: Option<Reid>) -> Option<Reid> {
     }
 }
 
-fn _get_claim() -> Option<(String, String)> {
+fn _get_claim() -> Option<(String, Key)> {
     let sub_options = &[CLMT_SSHKEY, CLMT_X509];
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Choose a key type to claim")
@@ -249,17 +249,33 @@ fn _get_claim() -> Option<(String, String)> {
                 Ok(path) => path,
             };
             let mut pubk_file = match File::open(ssh_pub_key_path) {
-                Err(why) => panic!("Couldn't open public key file, reason: {why}"),
+                Err(why) => {
+                    println!("Couldn't open public key file, reason: {why}");
+                    return None;
+                },
                 Ok(pubk_file) => pubk_file,
             };
 
             let mut pubk_raw: Vec<u8> = Vec::new();
             if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
-                panic!("Error reading public key file: {why}");
+                println!("Error reading public key file: {why}");
+                return None;
             };
+
+            let pubk_str: String = match String::from_utf8(pubk_raw) {
+                Err(why) => {
+                    println!("Error converting file to utf8: {why}");
+                    return None;
+                },
+                Ok(pubk_str) => pubk_str,
+            };
+            let pubk_str = pubk_str.replace(['\n', '\r'], "");
             Some((
                 CLMT_SSHKEY.to_string(),
-                String::from_utf8(pubk_raw).unwrap(),
+                (KT_ED25519.to_string(), pubk_str),
+                // TODO, currently only one key type(ED25519) is 
+                // supported so I have hard coded the key type, in future
+                // need to make an option to select key type here
             ))
         }
         1 => {
