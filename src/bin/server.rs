@@ -16,7 +16,10 @@ use graphlog_proto::{
     utils::http_server::IdMessage,
 };
 
-use openssl::base64::decode_block;
+use openssl::{
+    base64::decode_block,
+    pkey::{PKey, Public},
+};
 
 fn main() {
     let addr_port: String = Input::new()
@@ -135,11 +138,18 @@ fn _post_reid(
     };
     if content_type == "application/json" {
         let reid_json: ReidMessage = serde_json::from_str(&content_str).unwrap();
+        let pubk_b64: String = reid_json.pubk;
+        let pubk_raw = String::from_utf8(decode_block(&pubk_b64).unwrap()).unwrap();
+        let pubk: PKey<Public> = PKey::public_key_from_pem(pubk_raw.as_bytes()).unwrap();
         let reid_b64: String = reid_json.reid;
         let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
-        let reid: Reid = serde_json::from_str(&reid_raw).unwrap();
-        log.lock().unwrap().append(reid);
-        println!("Pushed reid to log");
+        let mut reid: Reid = serde_json::from_str(&reid_raw).unwrap();
+        if reid.verify_sig(&pubk) {
+            log.lock().unwrap().append(reid);
+            println!("Pushed reid to log");
+        } else {
+            println!("Couldn't verify signature, not appending to log");
+        }
     } else {
         println!("Recieved content_type: {content_type} that is not yet handled");
     }

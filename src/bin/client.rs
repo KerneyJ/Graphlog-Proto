@@ -5,6 +5,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use graphlog_proto::types::common::*;
 use graphlog_proto::types::reid::Reid;
+use openssl::base64::encode_block;
 use openssl::pkey::{PKey, Private, Public};
 use std::fs::File;
 use std::io::Read;
@@ -62,6 +63,21 @@ fn main() {
             2 => {
                 // Post Reid to log
                 let l: &mut Option<String> = &mut log_addr;
+                let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
+                    Err(why) => {
+                        println!("Couldn't convert public key to pem: {why}");
+                        continue;
+                    }
+                    Ok(pem) => pem,
+                };
+                let pem_str: String = match String::from_utf8(pem_vec) {
+                    Err(why) => {
+                        println!("Couldn't convert pem vec to string: {why}");
+                        continue;
+                    }
+                    Ok(pem_str) => pem_str,
+                };
+                let pem_b64: String = encode_block(pem_str.as_bytes());
                 if let Some(r) = &reid {
                     if l.is_none() {
                         let input: String = Input::new()
@@ -69,9 +85,9 @@ fn main() {
                             .interact_text()
                             .unwrap();
                         *l = Some(input);
-                        post_reid(l.clone().unwrap(), r);
+                        post_reid(l.clone().unwrap(), r, pem_b64);
                     } else {
-                        post_reid(l.clone().unwrap(), r);
+                        post_reid(l.clone().unwrap(), r, pem_b64);
                     }
                 } else {
                     println!("Reid not yet created");
@@ -252,7 +268,7 @@ fn _get_claim() -> Option<(String, Key)> {
                 Err(why) => {
                     println!("Couldn't open public key file, reason: {why}");
                     return None;
-                },
+                }
                 Ok(pubk_file) => pubk_file,
             };
 
@@ -266,14 +282,14 @@ fn _get_claim() -> Option<(String, Key)> {
                 Err(why) => {
                     println!("Error converting file to utf8: {why}");
                     return None;
-                },
+                }
                 Ok(pubk_str) => pubk_str,
             };
             let pubk_str = pubk_str.replace(['\n', '\r'], "");
             Some((
                 CLMT_SSHKEY.to_string(),
                 (KT_ED25519.to_string(), pubk_str),
-                // TODO, currently only one key type(ED25519) is 
+                // TODO, currently only one key type(ED25519) is
                 // supported so I have hard coded the key type, in future
                 // need to make an option to select key type here
             ))
@@ -326,7 +342,7 @@ fn _get_anchor() -> Option<(String, String)> {
     }
 }
 
-fn post_reid(log_addr: String, reid: &Reid) {
+fn post_reid(log_addr: String, reid: &Reid, pem_str: String) {
     // set Url
     let mut easy = Easy::new();
     let endpoint: String = format!("http://{log_addr}");
@@ -339,7 +355,11 @@ fn post_reid(log_addr: String, reid: &Reid) {
     easy.http_headers(headers).unwrap();
 
     // Set POST data
-    let data = format!("{{\"reid\": \"{}\"}}", reid.clone().encode());
+    let data = format!(
+        "{{\"reid\": \"{}\", \"pubk\": \"{}\"}}",
+        reid.clone().encode(),
+        pem_str
+    );
     // Note, this copies data into libcurl internal
     // buffer so we may want use easy.post_field_size()
     // and Read implementation - ChatGPT. Though I think

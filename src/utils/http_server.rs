@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Deserialize, Debug)]
 pub struct ReidMessage {
     pub reid: String,
+    pub pubk: String,
 }
 
 #[derive(Deserialize, Debug)]
