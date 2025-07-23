@@ -1,152 +1,157 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use curl::easy::{Easy, List};
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Input, Select};
-use graphlog_proto::types::common::*;
+use dialoguer::Input;
+use graphlog_proto::types::common::{AnchorType, ClaimType, ClientConfig, Config, Encodable};
 use graphlog_proto::types::reid::Reid;
-use openssl::base64::encode_block;
-use openssl::pkey::{PKey, Private, Public};
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
-use std::str::FromStr;
+use openssl::pkey::{Id, PKey, Private, Public};
+use std::{
+    env, fs,
+    fs::File,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser)]
 #[command(name = "graphlogo prototype client", version = "1.0")]
 #[command(about = "prototype client cli for interacting with graphlog")]
 struct Cli {
-    pubk_path: std::path::PathBuf,
-    prvk_path: std::path::PathBuf,
+    // Figure out things that we would do and put those options here
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Publish current reid to log
+    Publish {
+        #[arg(short, long)]
+        log_addr: Option<String>,
+    },
+    AppendAnchor {
+        #[arg(value_enum, short, long)]
+        anchor_type: AnchorType,
+        #[arg(short, long)]
+        anchor_value: String,
+    },
+    AppendClaim {
+        #[arg(short, long)]
+        claim_type: ClaimType,
+        #[arg(short, long)]
+        claim_value: String,
+    },
 }
 
 fn main() {
-    let args: Cli = Cli::parse();
+    let cli: Cli = Cli::parse();
+    let home_dir: PathBuf = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE")) // windows
+        .map(PathBuf::from)
+        .expect("Could not determine home directory");
 
-    let (pub_key, prv_key) = extract_keys_from_file(args);
-    let cli_options = &[
-        "Create User Reid",
-        "Update User Reid",
-        "Post User Reid to Log",
-        "Get Tail Reid",
-        "Look Up Id",
-        "Display User Reid",
-        "Exit",
-    ];
-    let mut reid: Option<Reid> = None;
-    let mut log_addr: Option<String> = None;
-    loop {
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("GraphLog Prototype")
-            .items(cli_options)
-            .interact()
-            .unwrap();
-        match selection {
-            0 => {
-                // Create Reid
-                let r: &mut Option<Reid> = &mut reid;
-                if r.is_none() {
-                    *r = create_reid_from_key(pub_key.clone(), prv_key.clone());
-                } else {
-                    println!("Reid already created");
-                }
-            }
-            1 => {
-                // Update Reid
-                let r: &mut Option<Reid> = &mut reid;
-                if r.is_none() {
-                    println!("Reid not yet created");
-                    continue;
-                }
-                *r = update_reid(r.take());
-            }
-            2 => {
-                // Post Reid to log
-                let l: &mut Option<String> = &mut log_addr;
-                let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
-                    Err(why) => {
-                        println!("Couldn't convert public key to pem: {why}");
-                        continue;
-                    }
-                    Ok(pem) => pem,
-                };
-                let pem_str: String = match String::from_utf8(pem_vec) {
-                    Err(why) => {
-                        println!("Couldn't convert pem vec to string: {why}");
-                        continue;
-                    }
-                    Ok(pem_str) => pem_str,
-                };
-                let pem_b64: String = encode_block(pem_str.as_bytes());
-                if let Some(r) = &reid {
-                    if l.is_none() {
-                        let input: String = Input::new()
-                            .with_prompt("Enter the Log's ip address/domain")
-                            .interact_text()
-                            .unwrap();
-                        *l = Some(input);
-                        post_reid(l.clone().unwrap(), r, pem_b64);
-                    } else {
-                        post_reid(l.clone().unwrap(), r, pem_b64);
-                    }
-                } else {
-                    println!("Reid not yet created");
-                    continue;
-                }
-            }
-            3 => {
-                // Get tail Reid
-                if let Some(l) = &log_addr {
-                    get_tail(l.to_string());
-                } else {
-                    let input: String = Input::new()
-                        .with_prompt("Enter the Log's ip address/domain")
-                        .interact_text()
-                        .unwrap();
-                    let l: &mut Option<String> = &mut log_addr;
-                    *l = Some(input);
-                    get_tail(l.as_ref().unwrap().to_string());
-                }
-            }
-            4 => {
-                // Look Up Reid given an Id
-                let l: &mut Option<String> = &mut log_addr;
-                if l.is_none() {
-                    let input: String = Input::new()
-                        .with_prompt("Enter the Log's ip address/domain")
-                        .interact_text()
-                        .unwrap();
-                    *l = Some(input);
-                    look_up_reid(l.clone().unwrap());
-                } else {
-                    look_up_reid(l.clone().unwrap());
-                }
-            }
-            5 => {
-                // Display the Curent user's Reid
-                if let Some(r) = &reid {
-                    println!("{r}");
-                }
-            }
-            _ => break,
+    let graphlog_dir = home_dir.join(".graphlog");
+
+    if graphlog_dir.exists() && graphlog_dir.is_dir() {
+        // Load from the config file
+        let pubk_path: PathBuf = graphlog_dir.join("graphlog-pub.key");
+        let prvk_path: PathBuf = graphlog_dir.join("graphlog-prv.key");
+        let conf_path: PathBuf = graphlog_dir.join("graphlog.toml");
+
+        let (pub_key, prv_key) = extract_keys_from_file(pubk_path, prvk_path);
+        let toml_str = fs::read_to_string(conf_path).unwrap();
+        let conf: Config = toml::from_str(&toml_str).unwrap();
+        parse_and_execute(pub_key, prv_key, conf, cli);
+    } else {
+        // Create key and config stuff
+        if let Err(why) = fs::create_dir_all(&graphlog_dir) {
+            panic!("Directory does not exist and failed to create: {why}");
         }
+        let (pub_key, prv_key, conf) = config_init(&graphlog_dir);
+        parse_and_execute(pub_key, prv_key, conf, cli);
     }
-
-    /*let mut reid = Reid::new_with_keys(&pub_key, &prv_key, expiration, None, None, None, true);
-    println!(
-        "{}\nIs valid: {}",
-        reid.to_json(),
-        reid.verify_sig(&pub_key)
-    );*/
 }
 
-fn extract_keys_from_file(args: Cli) -> (PKey<Public>, PKey<Private>) {
-    let mut pubk_file = match File::open(args.pubk_path) {
+// Initial config functions
+fn config_init(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>, Config) {
+    // create keys
+    let (pub_key, prv_key) = gen_keys(graphlog_dir);
+    // Input for what will be placed in the config file
+    let config = gen_config_file(graphlog_dir);
+    (pub_key, prv_key, config)
+}
+
+fn gen_keys(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>) {
+    let prv_key: PKey<Private> = PKey::generate_ed25519().unwrap();
+    let pub_key_raw: Vec<u8> = prv_key.raw_public_key().unwrap();
+    let pub_key: PKey<Public> = match PKey::public_key_from_raw_bytes(&pub_key_raw, Id::ED25519) {
+        Err(why) => panic!("Couldn't convert raw public key into Pkey<Public>: {why}"),
+        Ok(pub_key) => pub_key,
+    };
+
+    let pub_key_path: PathBuf = graphlog_dir.join("graphlog-pub.key");
+    let prv_key_path: PathBuf = graphlog_dir.join("graphlog-prv.key");
+    let puk_bytes: Vec<u8> = pub_key.public_key_to_pem().unwrap();
+    let prk_bytes: Vec<u8> = prv_key.private_key_to_pem_pkcs8().unwrap();
+
+    let mut pub_file = match File::create(&pub_key_path) {
+        Err(why) => panic!("couldn't create {}: {}", pub_key_path.display(), why),
+        Ok(pub_file) => pub_file,
+    };
+
+    match pub_file.write_all(&puk_bytes) {
+        Err(why) => panic!("couldn't write to public key: {why}"),
+        Ok(_) => println!("successfully wrote to public key"),
+    }
+
+    let mut prv_file = match File::create(prv_key_path) {
+        Err(why) => panic!("couldn't create {}: {}", pub_key_path.display(), why),
+        Ok(prv_file) => prv_file,
+    };
+
+    match prv_file.write_all(&prk_bytes) {
+        Err(why) => panic!("couldn't write to public key: {why}"),
+        Ok(_) => println!("successfully wrote to public key"),
+    }
+    (pub_key, prv_key)
+}
+
+fn gen_config_file(graphlog_dir: &Path) -> Config {
+    let config_path = graphlog_dir.join("graphlog.toml");
+    let log_addr: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter a log address")
+        .default(String::from("127.0.0.1:7878"))
+        .interact_text()
+        .unwrap();
+
+    let compiler_addr: Option<String> = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter a Compiler address")
+        .allow_empty(true)
+        .interact_text()
+        .ok();
+
+    let config = Config {
+        client_conf: Some(ClientConfig {
+            log_addr,
+            compiler_addr,
+        }),
+        server_conf: None,
+    };
+
+    let toml_string: String = toml::to_string_pretty(&config).unwrap();
+    if let Err(why) = fs::write(config_path, toml_string) {
+        println!("Error writing generated config to file: {why}");
+    }
+    config
+}
+
+fn extract_keys_from_file(pubk_path: PathBuf, prvk_path: PathBuf) -> (PKey<Public>, PKey<Private>) {
+    let mut pubk_file = match File::open(pubk_path) {
         Err(why) => panic!("Couldn't open public key file, reason: {why}"),
         Ok(pubk_file) => pubk_file,
     };
 
-    let mut prvk_file = match File::open(args.prvk_path) {
+    let mut prvk_file = match File::open(prvk_path) {
         Err(why) => panic!("Couldn't open public key file, reason: {why}"),
         Ok(prvk_file) => prvk_file,
     };
@@ -170,6 +175,25 @@ fn extract_keys_from_file(args: Cli) -> (PKey<Public>, PKey<Private>) {
         Ok(prv_key) => prv_key,
     };
     (pub_key, prv_key)
+}
+
+// Business functions that do stuff
+fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, conf: Config, cli: Cli) {
+    match cli.command {
+        // None => { println!("No options passed"); },
+        Commands::Publish { log_addr } => {
+        },
+        Commands::AppendAnchor {
+            anchor_type,
+            anchor_value,
+        } => {
+        },
+        Commands::AppendClaim {
+            claim_type,
+            claim_value,
+        } => {
+        },
+    }
 }
 
 fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option<Reid> {
@@ -208,7 +232,7 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
 
     None
 }
-
+/*
 fn update_reid(reid: Option<Reid>) -> Option<Reid> {
     // In this function I don't understand why I need clones
     // on the next line and at all return statements
@@ -243,7 +267,8 @@ fn update_reid(reid: Option<Reid>) -> Option<Reid> {
         _ => None,
     }
 }
-
+*/
+/*
 fn _get_claim() -> Option<(String, Key)> {
     let sub_options = &[CLMT_SSHKEY, CLMT_X509];
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -301,7 +326,8 @@ fn _get_claim() -> Option<(String, Key)> {
         _ => None,
     }
 }
-
+*/
+/*
 fn _get_anchor() -> Option<(String, String)> {
     let sub_options = &[AT_IPADDR, AT_DNS, AT_EMAIL, AT_PHONE];
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -341,7 +367,7 @@ fn _get_anchor() -> Option<(String, String)> {
         _ => None,
     }
 }
-
+*/
 fn post_reid(log_addr: String, reid: &Reid, pem_str: String) {
     // set Url
     let mut easy = Easy::new();
