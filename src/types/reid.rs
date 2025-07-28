@@ -1,7 +1,7 @@
-use crate::types::common::KT_ED25519;
+use crate::types::common::KeyType;
 use crate::utils::http_server::ReidMessage;
 
-use super::common::{Encodable, Decodable, Id, Key, Sig};
+use super::common::{Encodable, Decodable, Id, Key, Sig, AnchorType, ClaimType};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use omnipaxos::macros::Entry;
@@ -23,8 +23,8 @@ pub struct Reid {
     #[serde(with = "ts_seconds")]
     expiration: DateTime<Utc>, // datetime wherein which the record expires
     sig: Sig,             // signature
-    claims: Option<Vec<(String, Key)>>,
-    anchors: Option<Vec<(String, String)>>,
+    claims: Option<Vec<(ClaimType, Key)>>,
+    anchors: Option<Vec<(AnchorType, String)>>,
     revoked: bool,
 }
 
@@ -34,8 +34,8 @@ impl Reid {
         pow: Option<Vec<u8>>,
         expiration: DateTime<Utc>,
         sig: Sig,
-        claims: Option<Vec<(String, Key)>>,
-        anchors: Option<Vec<(String, String)>>,
+        claims: Option<Vec<(ClaimType, Key)>>,
+        anchors: Option<Vec<(AnchorType, String)>>,
         revoked: bool,
     ) -> Self {
         Self {
@@ -54,8 +54,8 @@ impl Reid {
         prv_key: &PKey<Private>,
         expiration: DateTime<Utc>,
         pow: Option<Vec<u8>>,
-        claims: Option<Vec<(String, Key)>>,
-        anchors: Option<Vec<(String, String)>>,
+        claims: Option<Vec<(ClaimType, Key)>>,
+        anchors: Option<Vec<(AnchorType, String)>>,
         revoked: bool,
     ) -> Self {
         // Generate ID which is just hash(public key)
@@ -118,16 +118,16 @@ impl Reid {
         }
     }
 
-    pub fn append_anchor(&mut self, anchor_type: String, anchor_value: String) {
+    pub fn append_anchor(&mut self, anchor_type: AnchorType, anchor_value: String) {
         self.anchors
             .get_or_insert_with(Vec::new)
             .push((anchor_type, anchor_value));
     }
 
-    pub fn append_claim(&mut self, key_type: String, key_value: Key) {
+    pub fn append_claim(&mut self, claim_type: ClaimType, claim_value: Key) {
         self.claims
             .get_or_insert_with(Vec::new)
-            .push((key_type, key_value));
+            .push((claim_type, claim_value));
     }
 
     pub fn to_json(&self) -> String {
@@ -136,7 +136,7 @@ impl Reid {
 
     pub fn key_to_pem(key: &Key) -> String {
         let key_value: &String = &key.1;
-        if key.0 == KT_ED25519 {
+        if key.0 == KeyType::ED25519 {
             key_value.clone()
         }
         else {
@@ -151,6 +151,10 @@ impl Reid {
 
     pub fn update_sig(&mut self, prv_key: &PKey<Private>) -> std::result::Result<Sig, ErrorStack> {
         Reid::sign_reid(prv_key, self)
+    }
+
+    pub fn revoke(&mut self) {
+        self.revoked = true;
     }
 
     fn sign_reid(
@@ -170,8 +174,8 @@ impl Reid {
         prv_key: &PKey<Private>,
         id: &Id,
         expiration: DateTime<Utc>,
-        claims: &Option<Vec<(String, Key)>>,
-        anchors: &Option<Vec<(String, String)>>,
+        claims: &Option<Vec<(ClaimType, Key)>>,
+        anchors: &Option<Vec<(AnchorType, String)>>,
     ) -> std::result::Result<Sig, openssl::error::ErrorStack> {
         let mut signer = Signer::new_without_digest(prv_key).unwrap();
         let reid_data: Vec<u8> = Reid::args_to_signable(id, expiration, claims, anchors); // Char vector that will be signed
@@ -195,19 +199,19 @@ impl Reid {
     fn args_to_signable(
         id: &Id,
         expiration: DateTime<Utc>,
-        claims: &Option<Vec<(String, Key)>>,
-        anchors: &Option<Vec<(String, String)>>,
+        claims: &Option<Vec<(ClaimType, Key)>>,
+        anchors: &Option<Vec<(AnchorType, String)>>,
     ) -> Vec<u8> {
         let mut data: Vec<u8> = Vec::new();
         data.extend(id.clone().iter());
 
-        let claims_clone: Option<Vec<(String, Key)>> = claims.clone();
+        let claims_clone: Option<Vec<(ClaimType, Key)>> = claims.clone();
         if let Some(claim_val) = claims_clone {
             let claim_raw: Vec<u8> = claim_val
                 .into_iter()
-                .flat_map(|(s, k)| {
-                    let mut combined = s.into_bytes();
-                    combined.extend(k.0.clone().into_bytes());
+                .flat_map(|(ct, k)| {
+                    let mut combined: Vec<u8> = vec![ct as u8];
+                    combined.push(k.0 as u8);
                     combined.extend(k.1.clone().into_bytes());
                     combined
                 })
@@ -215,13 +219,13 @@ impl Reid {
             data.extend(claim_raw);
         }
 
-        let anchors_clone: Option<Vec<(String, String)>> = anchors.clone();
+        let anchors_clone: Option<Vec<(AnchorType, String)>> = anchors.clone();
         if let Some(anchor_val) = anchors_clone {
             let anchor_raw: Vec<u8> = anchor_val
                 .into_iter()
-                .flat_map(|(s1, s2)| {
-                    let mut combined = s1.into_bytes();
-                    combined.extend(s2.into_bytes());
+                .flat_map(|(at, av)| {
+                    let mut combined: Vec<u8> = vec![at as u8];
+                    combined.extend(av.into_bytes());
                     combined
                 })
                 .collect();

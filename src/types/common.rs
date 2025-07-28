@@ -1,8 +1,10 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use clap::ValueEnum;
 
 pub type Id = Vec<u8>;
-pub type Key = (String, String);
+pub type Key = (KeyType, String);
 pub type Sig = Vec<u8>;
 
 pub trait Encodable {
@@ -13,9 +15,46 @@ pub trait Decodable<T> {
     fn decode(b64: &str) -> Option<T>;
 }
 
-// AT => ANCHOR_TYPE
+#[repr(u8)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum ClaimType {
+    SSHKEY,
+    X509,
+}
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+impl fmt::Display for ClaimType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::SSHKEY => {
+                writeln!(f, "SSH Key").unwrap();
+            },
+            Self::X509 => {
+                writeln!(f, "X.509").unwrap();
+            },
+        }
+        Ok(())
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum KeyType {
+    ED25519,
+}
+
+impl fmt::Display for KeyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::ED25519 => {
+                writeln!(f, "ED25519").unwrap();
+            },
+        };
+        Ok(())
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum AnchorType {
     DNS,
     EMAIL,
@@ -23,14 +62,25 @@ pub enum AnchorType {
     IPADDR,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum ClaimType {
-    SSHKEY,
-    X509,
+impl fmt::Display for AnchorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::DNS => {
+                writeln!(f, "DNS Entry").unwrap();
+            },
+            Self::EMAIL => {
+                writeln!(f, "Email").unwrap();
+            },
+            Self::PHONE => {
+                writeln!(f, "Phone").unwrap();
+            },
+            Self::IPADDR => {
+                writeln!(f, "Ip Addr").unwrap();
+            },
+        }
+        Ok(())
+    }
 }
-
-// KT => KEY_TYPE
-pub static KT_ED25519: &str = "ED25519";
 
 pub fn id_equal(id1: Id, id2: Id) -> bool {
     if id1.len() != id2.len() {
@@ -57,6 +107,8 @@ pub struct Config {
 pub struct ClientConfig {
     pub log_addr: String,
     pub compiler_addr: Option<String>,
+    pub claims: Option<Vec<(ClaimType, Key)>>,
+    pub anchors: Option<Vec<(AnchorType, String)>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

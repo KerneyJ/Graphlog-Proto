@@ -1,11 +1,12 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use curl::easy::{Easy, List};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Input;
-use graphlog_proto::types::common::{AnchorType, ClaimType, ClientConfig, Config, Encodable};
+use graphlog_proto::types::common::{AnchorType, ClaimType, ClientConfig, Config, Encodable, Key, KeyType};
 use graphlog_proto::types::reid::Reid;
 use openssl::pkey::{Id, PKey, Private, Public};
+use std::panic;
 use std::{
     env, fs,
     fs::File,
@@ -19,7 +20,7 @@ use std::{
 struct Cli {
     // Figure out things that we would do and put those options here
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -29,17 +30,37 @@ enum Commands {
         #[arg(short, long)]
         log_addr: Option<String>,
     },
-    AppendAnchor {
-        #[arg(value_enum, short, long)]
-        anchor_type: AnchorType,
-        #[arg(short, long)]
-        anchor_value: String,
-    },
+    /// Append a claim to current reid
     AppendClaim {
-        #[arg(short, long)]
+        #[arg(value_enum, long)]
         claim_type: ClaimType,
+        #[arg(long)]
+        claim_key_type: KeyType,
+        #[arg(long)]
+        claim_key_path: PathBuf,
         #[arg(short, long)]
-        claim_value: String,
+        publish: Option<bool>,
+    },
+    /// Append an anchor to current reid
+    AppendAnchor {
+        #[arg(value_enum, long)]
+        anchor_type: AnchorType,
+        #[arg(long)]
+        anchor_value: String,
+        #[arg(short, long)]
+        publish: Option<bool>,
+    },
+    /// Look up reid using base64 id
+    LookupReid {
+        #[arg(short, long)]
+        id: String,
+        #[arg(short, long)]
+        log_addr: Option<String>,
+    },
+    /// Mark Reid entry as revoked
+    Revoke {
+        #[arg(short, long)]
+        log_addr: Option<String>,
     },
 }
 
@@ -134,6 +155,8 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
         client_conf: Some(ClientConfig {
             log_addr,
             compiler_addr,
+            claims: None,
+            anchors: None,
         }),
         server_conf: None,
     };
@@ -146,54 +169,144 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
 }
 
 fn extract_keys_from_file(pubk_path: PathBuf, prvk_path: PathBuf) -> (PKey<Public>, PKey<Private>) {
+    (load_public_key_from_file(pubk_path), load_private_key_from_file(prvk_path))
+}
+
+fn load_public_key_from_file(pubk_path: PathBuf) -> PKey<Public> {
     let mut pubk_file = match File::open(pubk_path) {
         Err(why) => panic!("Couldn't open public key file, reason: {why}"),
         Ok(pubk_file) => pubk_file,
     };
+    let mut pubk_raw: Vec<u8> = Vec::new();
+    if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
+        panic!("Error reading public key file: {why}");
+    };
+    match PKey::public_key_from_pem(&pubk_raw) {
+        Err(why) => panic!("Couldn't load public key from bytes, reason: {why}"),
+        Ok(pub_key) => pub_key,
+    }
+}
 
+fn load_private_key_from_file(prvk_path: PathBuf) -> PKey<Private> {
     let mut prvk_file = match File::open(prvk_path) {
         Err(why) => panic!("Couldn't open public key file, reason: {why}"),
         Ok(prvk_file) => prvk_file,
     };
-
-    let mut pubk_raw: Vec<u8> = Vec::new();
     let mut prvk_raw: Vec<u8> = Vec::new();
-
-    if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
-        panic!("Error reading public key file: {why}");
-    };
     if let Err(why) = prvk_file.read_to_end(&mut prvk_raw) {
         panic!("Error reading private key file: {why}");
     };
 
-    let pub_key: PKey<Public> = match PKey::public_key_from_pem(&pubk_raw) {
-        Err(why) => panic!("Couldn't load public key from bytes, reason: {why}"),
-        Ok(pub_key) => pub_key,
-    };
-    let prv_key: PKey<Private> = match PKey::private_key_from_pem(&prvk_raw) {
+    match PKey::private_key_from_pem(&prvk_raw) {
         Err(why) => panic!("Couldn't load private key from bytes, reason: {why}"),
         Ok(prv_key) => prv_key,
-    };
-    (pub_key, prv_key)
+    }
 }
 
 // Business functions that do stuff
-fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, conf: Config, cli: Cli) {
+fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Config, cli: Cli) {
+    // TODO eventually load all of the reid anchor and claims from the config file here
+    let mut reid: Reid = match create_reid_from_key(pub_key.clone(), prv_key) {
+        None => panic!("Could not create read from public keys"),
+        Some(reid) => reid,
+    };
     match cli.command {
-        // None => { println!("No options passed"); },
-        Commands::Publish { log_addr } => {
+        Some(Commands::Publish { log_addr }) => {
+            // get pem_str
+            let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
+                Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
+                Ok(vec) => vec,
+            };
+            let pem_str: String = match String::from_utf8(pem_vec) {
+                Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
+                Ok(str) => str,
+            };
+
+            if let Some(log_addr) = log_addr {
+                publish_reid(log_addr, &reid, pem_str);
+            }
+            else {
+                let client_config: ClientConfig = config.client_conf.unwrap();
+                publish_reid(client_config.log_addr, &reid, pem_str);
+            }
         },
-        Commands::AppendAnchor {
+        Some(Commands::AppendClaim {
+            claim_type,
+            claim_key_type,
+            claim_key_path,
+            publish,
+        }) => {
+            // get pem_str
+            let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
+                Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
+                Ok(vec) => vec,
+            };
+            let pem_str: String = match String::from_utf8(pem_vec) {
+                Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
+                Ok(str) => str,
+            };
+
+            // get claim key
+            let claim_pkey: PKey<Public> = load_public_key_from_file(claim_key_path);
+            let claim_key_vec: Vec<u8> = match claim_pkey.public_key_to_pem() {
+                Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
+                Ok(vec) => vec,
+            };
+            let claim_key_str: String = match String::from_utf8(claim_key_vec) {
+                Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
+                Ok(str) => str,
+            };
+            let claim_value: Key = (claim_key_type, claim_key_str);
+            append_claim(claim_type, claim_value, reid, config, publish.unwrap_or_default(), pem_str);
+        },
+        Some(Commands::AppendAnchor {
             anchor_type,
             anchor_value,
-        } => {
+            publish,
+        }) => {
+            let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
+                Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
+                Ok(vec) => vec,
+            };
+            let pem_str: String = match String::from_utf8(pem_vec) {
+                Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
+                Ok(str) => str,
+            };
+            append_anchor(anchor_type, anchor_value, reid, config, publish.unwrap_or_default(), pem_str);
         },
-        Commands::AppendClaim {
-            claim_type,
-            claim_value,
-        } => {
+        Some(Commands::LookupReid { id, log_addr }) => {
+            if let Some(log_addr) = log_addr {
+                look_up_reid(log_addr, id);
+            }
+            else {
+                let client_config: ClientConfig = config.client_conf.unwrap();
+                look_up_reid(client_config.log_addr, id);
+            }
         },
-    }
+        Some(Commands::Revoke { log_addr }) => {
+            reid.revoke();
+            let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
+                Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
+                Ok(vec) => vec,
+            };
+            let pem_str: String = match String::from_utf8(pem_vec) {
+                Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
+                Ok(str) => str,
+            };
+
+            if let Some(log_addr) = log_addr {
+                publish_reid(log_addr, &reid, pem_str);
+            }
+            else {
+                let client_config: ClientConfig = config.client_conf.unwrap();
+                publish_reid(client_config.log_addr, &reid, pem_str);
+            }
+        },
+        None => {
+            Cli::command().print_help().unwrap();
+            panic!("Incorrect arguments");
+        },
+   }
 }
 
 fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option<Reid> {
@@ -232,143 +345,34 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
 
     None
 }
-/*
-fn update_reid(reid: Option<Reid>) -> Option<Reid> {
-    // In this function I don't understand why I need clones
-    // on the next line and at all return statements
-    let r: &mut Reid = &mut reid.unwrap().clone();
-    let sub_options = &["Append Claim", "Append Anchor"];
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("GraphLog Prototype")
-        .items(sub_options)
-        .interact()
-        .unwrap();
-    match selection {
-        0 => {
-            // Append claim
-            if let Some((claim_type, claim_value)) = _get_claim() {
-                r.append_claim(claim_type, claim_value);
-                Some(r.clone())
-            } else {
-                println!("Getting claim type failed");
-                Some(r.clone())
-            }
-        }
-        1 => {
-            // Append anchor
-            if let Some((anchor_type, anchor_value)) = _get_anchor() {
-                r.append_anchor(anchor_type, anchor_value);
-                Some(r.clone())
-            } else {
-                println!("Getting anchor type failed");
-                Some(r.clone())
-            }
-        }
-        _ => None,
-    }
-}
-*/
-/*
-fn _get_claim() -> Option<(String, Key)> {
-    let sub_options = &[CLMT_SSHKEY, CLMT_X509];
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Choose a key type to claim")
-        .items(sub_options)
-        .interact()
-        .unwrap();
-    match selection {
-        0 => {
-            let ssh_pub_key_filename: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("SSH Public Key Path")
-                .interact()
-                .unwrap();
-            let ssh_pub_key_path = match PathBuf::from_str(&ssh_pub_key_filename) {
-                Err(why) => {
-                    println!("Failed to read ssh pub key file: {why}");
-                    return None;
-                }
-                Ok(path) => path,
-            };
-            let mut pubk_file = match File::open(ssh_pub_key_path) {
-                Err(why) => {
-                    println!("Couldn't open public key file, reason: {why}");
-                    return None;
-                }
-                Ok(pubk_file) => pubk_file,
-            };
 
-            let mut pubk_raw: Vec<u8> = Vec::new();
-            if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
-                println!("Error reading public key file: {why}");
-                return None;
-            };
+fn append_claim(claim_type: ClaimType, claim_value: Key, mut reid: Reid, config: Config, publish: bool, pem_str: String) {
+    reid.append_claim(claim_type.clone(), claim_value.clone());
+    if config.client_conf.is_none() {
+        panic!("Client configuartion is none");
+    }
+    let client_config: ClientConfig = config.client_conf.unwrap();
+    let log_addr: String = client_config.log_addr.clone();
+    client_config.claims.unwrap().push((claim_type, claim_value));
+    if publish {
+        publish_reid(log_addr, &reid, pem_str);
+    }
+}
 
-            let pubk_str: String = match String::from_utf8(pubk_raw) {
-                Err(why) => {
-                    println!("Error converting file to utf8: {why}");
-                    return None;
-                }
-                Ok(pubk_str) => pubk_str,
-            };
-            let pubk_str = pubk_str.replace(['\n', '\r'], "");
-            Some((
-                CLMT_SSHKEY.to_string(),
-                (KT_ED25519.to_string(), pubk_str),
-                // TODO, currently only one key type(ED25519) is
-                // supported so I have hard coded the key type, in future
-                // need to make an option to select key type here
-            ))
-        }
-        1 => {
-            println!("Not implemented!");
-            None
-        }
-        _ => None,
+fn append_anchor(anchor_type: AnchorType, anchor_value: String, mut reid: Reid, config: Config, publish: bool, pem_str: String) {
+    reid.append_anchor(anchor_type.clone(), anchor_value.clone());
+    if config.client_conf.is_none() {
+        panic!("Clinet configuration is none");
+    }
+    let client_config: ClientConfig = config.client_conf.unwrap();
+    let log_addr: String = client_config.log_addr.clone();
+    client_config.anchors.unwrap().push((anchor_type, anchor_value));
+    if publish {
+        publish_reid(log_addr, &reid, pem_str);
     }
 }
-*/
-/*
-fn _get_anchor() -> Option<(String, String)> {
-    let sub_options = &[AT_IPADDR, AT_DNS, AT_EMAIL, AT_PHONE];
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Choose an Anchor type to root your claims")
-        .items(sub_options)
-        .interact()
-        .unwrap();
-    match selection {
-        0 => {
-            let anchor: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter ip address")
-                .interact()
-                .unwrap();
-            Some((AT_IPADDR.to_string(), anchor))
-        }
-        1 => {
-            let anchor: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter domain name")
-                .interact()
-                .unwrap();
-            Some((AT_DNS.to_string(), anchor))
-        }
-        2 => {
-            let anchor: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter email address")
-                .interact()
-                .unwrap();
-            Some((AT_EMAIL.to_string(), anchor))
-        }
-        3 => {
-            let anchor: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter phone number")
-                .interact()
-                .unwrap();
-            Some((AT_PHONE.to_string(), anchor))
-        }
-        _ => None,
-    }
-}
-*/
-fn post_reid(log_addr: String, reid: &Reid, pem_str: String) {
+
+fn publish_reid(log_addr: String, reid: &Reid, pem_str: String) {
     // set Url
     let mut easy = Easy::new();
     let endpoint: String = format!("http://{log_addr}");
@@ -422,12 +426,7 @@ fn get_tail(log_addr: String) {
     easy.perform().unwrap();
 }
 
-fn look_up_reid(log_addr: String) {
-    let id_b64: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Enter base64 encoded Id")
-        .interact()
-        .unwrap();
-
+fn look_up_reid(log_addr: String, id_b64: String) {
     // set Url
     let mut easy = Easy::new();
     let endpoint: String = format!("http://{log_addr}/look_up");

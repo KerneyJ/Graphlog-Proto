@@ -65,7 +65,7 @@ impl Endorsement {
                     let mut combined = Vec::new();
                     combined.extend(i);
                     combined.extend(s.clone().into_bytes());
-                    combined.extend(k.0.clone().into_bytes()); // Key type
+                    combined.push(k.0 as u8); // Key type
                     combined.extend(k.1.clone().into_bytes()); // Key value
                     combined
                 })
