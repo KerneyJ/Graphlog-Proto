@@ -3,7 +3,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use curl::easy::{Easy, List};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Input;
-use graphlog_proto::types::common::{AnchorType, ClaimType, ClientConfig, Config, Encodable, Key, KeyType};
+use graphlog_proto::types::common::{
+    AnchorType, ClaimType, ClientConfig, Config, Encodable, Key, KeyType,
+};
 use graphlog_proto::types::reid::Reid;
 use openssl::pkey::{Id, PKey, Private, Public};
 use std::panic;
@@ -82,7 +84,7 @@ fn main() {
 
         let (pub_key, prv_key) = extract_keys_from_file(pubk_path, prvk_path);
         let toml_str = fs::read_to_string(conf_path).unwrap();
-        let config: Config =match toml::from_str(&toml_str) {
+        let config: Config = match toml::from_str(&toml_str) {
             Err(why) => panic!("Error loading toml: {why}"),
             Ok(config) => config,
         };
@@ -185,7 +187,10 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
 }
 
 fn extract_keys_from_file(pubk_path: PathBuf, prvk_path: PathBuf) -> (PKey<Public>, PKey<Private>) {
-    (load_public_key_from_file(pubk_path), load_private_key_from_file(prvk_path))
+    (
+        load_public_key_from_file(pubk_path),
+        load_private_key_from_file(prvk_path),
+    )
 }
 
 fn load_public_key_from_file(pubk_path: PathBuf) -> PKey<Public> {
@@ -224,9 +229,8 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
     // TODO eventually load all of the reid anchor and claims from the config file here
     let client_config: ClientConfig = config.client_conf.unwrap();
     let expiration: DateTime<Utc> = client_config.expiration;
-    let mut reid: Reid = Reid::new_with_keys(
-        &pub_key, &prv_key, expiration, None, None, None, false,
-    );
+    let mut reid: Reid =
+        Reid::new_with_keys(&pub_key, &prv_key, expiration, None, None, None, false);
     match cli.command {
         Some(Commands::Publish { log_addr }) => {
             // get pem_str
@@ -241,11 +245,10 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
 
             if let Some(log_addr) = log_addr {
                 publish_reid(log_addr, &reid, pem_str);
-            }
-            else {
+            } else {
                 publish_reid(client_config.log_addr, &reid, pem_str);
             }
-        },
+        }
         Some(Commands::AppendClaim {
             claim_type,
             claim_key_type,
@@ -273,8 +276,15 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 Ok(str) => str,
             };
             let claim_value: Key = (claim_key_type, claim_key_str);
-            append_claim(claim_type, claim_value, reid, client_config, publish.unwrap_or_default(), pem_str);
-        },
+            append_claim(
+                claim_type,
+                claim_value,
+                reid,
+                client_config,
+                publish.unwrap_or_default(),
+                pem_str,
+            );
+        }
         Some(Commands::AppendAnchor {
             anchor_type,
             anchor_value,
@@ -288,16 +298,22 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
                 Ok(str) => str,
             };
-            append_anchor(anchor_type, anchor_value, reid, client_config, publish.unwrap_or_default(), pem_str);
-        },
+            append_anchor(
+                anchor_type,
+                anchor_value,
+                reid,
+                client_config,
+                publish.unwrap_or_default(),
+                pem_str,
+            );
+        }
         Some(Commands::LookupReid { id, log_addr }) => {
             if let Some(log_addr) = log_addr {
                 look_up_reid(log_addr, id);
-            }
-            else {
+            } else {
                 look_up_reid(client_config.log_addr, id);
             }
-        },
+        }
         Some(Commands::Revoke { log_addr }) => {
             reid.revoke();
             let pem_vec: Vec<u8> = match pub_key.public_key_to_pem() {
@@ -311,16 +327,15 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
 
             if let Some(log_addr) = log_addr {
                 publish_reid(log_addr, &reid, pem_str);
-            }
-            else {
+            } else {
                 publish_reid(client_config.log_addr, &reid, pem_str);
             }
-        },
+        }
         None => {
             Cli::command().print_help().unwrap();
             panic!("Incorrect arguments");
-        },
-   }
+        }
+    }
 }
 
 fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
@@ -341,19 +356,39 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-fn append_claim(claim_type: ClaimType, claim_value: Key, mut reid: Reid, client_config: ClientConfig, publish: bool, pem_str: String) {
+fn append_claim(
+    claim_type: ClaimType,
+    claim_value: Key,
+    mut reid: Reid,
+    client_config: ClientConfig,
+    publish: bool,
+    pem_str: String,
+) {
     reid.append_claim(claim_type.clone(), claim_value.clone());
     let log_addr: String = client_config.log_addr.clone();
-    client_config.claims.unwrap().push((claim_type, claim_value));
+    client_config
+        .claims
+        .unwrap()
+        .push((claim_type, claim_value));
     if publish {
         publish_reid(log_addr, &reid, pem_str);
     }
 }
 
-fn append_anchor(anchor_type: AnchorType, anchor_value: String, mut reid: Reid, client_config: ClientConfig, publish: bool, pem_str: String) {
+fn append_anchor(
+    anchor_type: AnchorType,
+    anchor_value: String,
+    mut reid: Reid,
+    client_config: ClientConfig,
+    publish: bool,
+    pem_str: String,
+) {
     reid.append_anchor(anchor_type.clone(), anchor_value.clone());
     let log_addr: String = client_config.log_addr.clone();
-    client_config.anchors.unwrap().push((anchor_type, anchor_value));
+    client_config
+        .anchors
+        .unwrap()
+        .push((anchor_type, anchor_value));
     if publish {
         publish_reid(log_addr, &reid, pem_str);
     }

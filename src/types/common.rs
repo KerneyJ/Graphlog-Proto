@@ -1,8 +1,8 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 
 pub type Id = Vec<u8>;
 pub type Key = (KeyType, String);
@@ -28,10 +28,10 @@ impl fmt::Display for ClaimType {
         match &self {
             Self::SSHKEY => {
                 writeln!(f, "SSH Key").unwrap();
-            },
+            }
             Self::X509 => {
                 writeln!(f, "X.509").unwrap();
-            },
+            }
         }
         Ok(())
     }
@@ -48,7 +48,7 @@ impl fmt::Display for KeyType {
         match &self {
             Self::ED25519 => {
                 writeln!(f, "ED25519").unwrap();
-            },
+            }
         };
         Ok(())
     }
@@ -68,16 +68,16 @@ impl fmt::Display for AnchorType {
         match &self {
             Self::DNS => {
                 writeln!(f, "DNS Entry").unwrap();
-            },
+            }
             Self::EMAIL => {
                 writeln!(f, "Email").unwrap();
-            },
+            }
             Self::PHONE => {
                 writeln!(f, "Phone").unwrap();
-            },
+            }
             Self::IPADDR => {
                 writeln!(f, "Ip Addr").unwrap();
-            },
+            }
         }
         Ok(())
     }
