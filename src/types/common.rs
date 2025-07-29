@@ -1,5 +1,6 @@
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use clap::ValueEnum;
 
@@ -107,6 +108,7 @@ pub struct Config {
 pub struct ClientConfig {
     pub log_addr: String,
     pub compiler_addr: Option<String>,
+    pub expiration: DateTime<Utc>,
     pub claims: Option<Vec<(ClaimType, Key)>>,
     pub anchors: Option<Vec<(AnchorType, String)>>,
 }

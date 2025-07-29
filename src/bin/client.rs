@@ -17,6 +17,7 @@ use std::{
 #[derive(Parser)]
 #[command(name = "graphlogo prototype client", version = "1.0")]
 #[command(about = "prototype client cli for interacting with graphlog")]
+#[command(arg_required_else_help = true)]
 struct Cli {
     // Figure out things that we would do and put those options here
     #[command(subcommand)]
@@ -81,8 +82,11 @@ fn main() {
 
         let (pub_key, prv_key) = extract_keys_from_file(pubk_path, prvk_path);
         let toml_str = fs::read_to_string(conf_path).unwrap();
-        let conf: Config = toml::from_str(&toml_str).unwrap();
-        parse_and_execute(pub_key, prv_key, conf, cli);
+        let config: Config =match toml::from_str(&toml_str) {
+            Err(why) => panic!("Error loading toml: {why}"),
+            Ok(config) => config,
+        };
+        parse_and_execute(pub_key, prv_key, config, cli);
     } else {
         // Create key and config stuff
         if let Err(why) = fs::create_dir_all(&graphlog_dir) {
@@ -122,7 +126,7 @@ fn gen_keys(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>) {
 
     match pub_file.write_all(&puk_bytes) {
         Err(why) => panic!("couldn't write to public key: {why}"),
-        Ok(_) => println!("successfully wrote to public key"),
+        Ok(_) => println!("Wrote public key to file"),
     }
 
     let mut prv_file = match File::create(prv_key_path) {
@@ -132,7 +136,7 @@ fn gen_keys(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>) {
 
     match prv_file.write_all(&prk_bytes) {
         Err(why) => panic!("couldn't write to public key: {why}"),
-        Ok(_) => println!("successfully wrote to public key"),
+        Ok(_) => println!("Wrote private key to file"),
     }
     (pub_key, prv_key)
 }
@@ -150,11 +154,23 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
         .allow_empty(true)
         .interact_text()
         .ok();
+    let expiration_str: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter an expiration date")
+        .default(String::from("2026-07-16 12:00"))
+        .interact_text()
+        .unwrap();
+    let expiration: DateTime<Utc> = match _parse_datetime(&expiration_str) {
+        Some(dt) => dt.with_timezone(&Utc),
+        None => {
+            panic!("Failed to read date input");
+        }
+    };
 
     let config = Config {
         client_conf: Some(ClientConfig {
             log_addr,
             compiler_addr,
+            expiration,
             claims: None,
             anchors: None,
         }),
@@ -206,10 +222,11 @@ fn load_private_key_from_file(prvk_path: PathBuf) -> PKey<Private> {
 // Business functions that do stuff
 fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Config, cli: Cli) {
     // TODO eventually load all of the reid anchor and claims from the config file here
-    let mut reid: Reid = match create_reid_from_key(pub_key.clone(), prv_key) {
-        None => panic!("Could not create read from public keys"),
-        Some(reid) => reid,
-    };
+    let client_config: ClientConfig = config.client_conf.unwrap();
+    let expiration: DateTime<Utc> = client_config.expiration;
+    let mut reid: Reid = Reid::new_with_keys(
+        &pub_key, &prv_key, expiration, None, None, None, false,
+    );
     match cli.command {
         Some(Commands::Publish { log_addr }) => {
             // get pem_str
@@ -226,7 +243,6 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 publish_reid(log_addr, &reid, pem_str);
             }
             else {
-                let client_config: ClientConfig = config.client_conf.unwrap();
                 publish_reid(client_config.log_addr, &reid, pem_str);
             }
         },
@@ -257,7 +273,7 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 Ok(str) => str,
             };
             let claim_value: Key = (claim_key_type, claim_key_str);
-            append_claim(claim_type, claim_value, reid, config, publish.unwrap_or_default(), pem_str);
+            append_claim(claim_type, claim_value, reid, client_config, publish.unwrap_or_default(), pem_str);
         },
         Some(Commands::AppendAnchor {
             anchor_type,
@@ -272,14 +288,13 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
                 Ok(str) => str,
             };
-            append_anchor(anchor_type, anchor_value, reid, config, publish.unwrap_or_default(), pem_str);
+            append_anchor(anchor_type, anchor_value, reid, client_config, publish.unwrap_or_default(), pem_str);
         },
         Some(Commands::LookupReid { id, log_addr }) => {
             if let Some(log_addr) = log_addr {
                 look_up_reid(log_addr, id);
             }
             else {
-                let client_config: ClientConfig = config.client_conf.unwrap();
                 look_up_reid(client_config.log_addr, id);
             }
         },
@@ -298,7 +313,6 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 publish_reid(log_addr, &reid, pem_str);
             }
             else {
-                let client_config: ClientConfig = config.client_conf.unwrap();
                 publish_reid(client_config.log_addr, &reid, pem_str);
             }
         },
@@ -307,25 +321,6 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
             panic!("Incorrect arguments");
         },
    }
-}
-
-fn create_reid_from_key(pub_key: PKey<Public>, prv_key: PKey<Private>) -> Option<Reid> {
-    let input: String = Input::new()
-        .with_prompt("Enter an expiration date")
-        .default(String::from("2026-07-16 12:00"))
-        .interact_text()
-        .unwrap();
-    let expiration: DateTime<Utc> = match _parse_datetime(&input) {
-        Some(dt) => dt.with_timezone(&Utc),
-        None => {
-            println!("Failed to read date input");
-            return None;
-        }
-    };
-
-    Some(Reid::new_with_keys(
-        &pub_key, &prv_key, expiration, None, None, None, false,
-    ))
 }
 
 fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
@@ -346,12 +341,8 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-fn append_claim(claim_type: ClaimType, claim_value: Key, mut reid: Reid, config: Config, publish: bool, pem_str: String) {
+fn append_claim(claim_type: ClaimType, claim_value: Key, mut reid: Reid, client_config: ClientConfig, publish: bool, pem_str: String) {
     reid.append_claim(claim_type.clone(), claim_value.clone());
-    if config.client_conf.is_none() {
-        panic!("Client configuartion is none");
-    }
-    let client_config: ClientConfig = config.client_conf.unwrap();
     let log_addr: String = client_config.log_addr.clone();
     client_config.claims.unwrap().push((claim_type, claim_value));
     if publish {
@@ -359,12 +350,8 @@ fn append_claim(claim_type: ClaimType, claim_value: Key, mut reid: Reid, config:
     }
 }
 
-fn append_anchor(anchor_type: AnchorType, anchor_value: String, mut reid: Reid, config: Config, publish: bool, pem_str: String) {
+fn append_anchor(anchor_type: AnchorType, anchor_value: String, mut reid: Reid, client_config: ClientConfig, publish: bool, pem_str: String) {
     reid.append_anchor(anchor_type.clone(), anchor_value.clone());
-    if config.client_conf.is_none() {
-        panic!("Clinet configuration is none");
-    }
-    let client_config: ClientConfig = config.client_conf.unwrap();
     let log_addr: String = client_config.log_addr.clone();
     client_config.anchors.unwrap().push((anchor_type, anchor_value));
     if publish {
