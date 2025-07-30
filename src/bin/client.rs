@@ -59,12 +59,17 @@ enum Commands {
         #[arg(short, long)]
         log_addr: Option<String>,
     },
+    /// Get the last entry of a log
+    GetTail {
+        #[arg(short, long)]
+        log_addr: Option<String>,
+    },
     /// Mark Reid entry as revoked
     Revoke {
         #[arg(short, long)]
         log_addr: Option<String>,
     },
-    // TODO add tail and tail_num
+    // TODO add tail_num
 }
 
 #[tokio::main]
@@ -320,6 +325,13 @@ async fn parse_and_execute(
                 look_up_reid(log_addr, id).await;
             } else {
                 look_up_reid(client_config.log_addr, id).await;
+            }
+        }
+        Some(Commands::GetTail { log_addr }) => {
+            if let Some(log_addr) = log_addr {
+                get_tail(log_addr).await;
+            } else {
+                get_tail(client_config.log_addr).await;
             }
         }
         Some(Commands::Revoke { log_addr }) => {
