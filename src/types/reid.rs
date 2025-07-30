@@ -4,7 +4,6 @@ use crate::utils::http_server::ReidMessage;
 use super::common::{Encodable, Decodable, Id, Key, Sig, AnchorType, ClaimType};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
-use omnipaxos::macros::Entry;
 use openssl::base64::{decode_block, encode_block};
 use openssl::sign::Verifier;
 use openssl::{
@@ -16,7 +15,7 @@ use openssl::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Entry)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Reid {
     pub id: Id,           // Hash of public key
     pow: Option<Vec<u8>>, // proof of work, optionally required by the log
@@ -91,7 +90,7 @@ impl Reid {
             revoked,
         }
     }
-
+/* TODO REMOVE
     pub fn new_from_header(header: Vec<String>) -> Option<Self> {
         let content_type: String = match header.iter().find(|s| s.contains("Content-Type: ")) {
             Some(found) => found.strip_prefix("Content-Type: ").unwrap().to_string(),
@@ -117,7 +116,7 @@ impl Reid {
             Ok(reid) => reid,
         }
     }
-
+*/
     pub fn append_anchor(&mut self, anchor_type: AnchorType, anchor_value: String) {
         self.anchors
             .get_or_insert_with(Vec::new)
@@ -186,7 +185,7 @@ impl Reid {
         Ok(sig.to_vec())
     }
 
-    pub fn verify_sig(&mut self, pub_key: &PKey<Public>) -> bool {
+    pub fn verify_sig(&self, pub_key: &PKey<Public>) -> bool {
         let mut verify = Verifier::new_without_digest(pub_key).unwrap();
         let data: Vec<u8> = Reid::reid_to_signable(self);
         verify.verify_oneshot(&self.sig, &data).unwrap()

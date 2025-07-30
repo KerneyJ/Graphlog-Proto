@@ -75,8 +75,24 @@ impl<T> Log<T> {
         self._log.first().unwrap()
     }
 
-    pub fn tail(&mut self) -> &T {
+    pub fn tail(&self) -> &T {
         self._log.last().unwrap()
+    }
+
+    pub fn tailn(&self, n: usize) -> Vec<T> 
+    where T: Clone
+    {
+        let len: usize = self._log.len();
+        let start = len.saturating_sub(n);
+        self._log[start..].to_vec()
+    }
+
+    pub fn len(&self) -> usize {
+        self._log.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self._log.is_empty()
     }
 
     // Since the log is append only the item I want to find

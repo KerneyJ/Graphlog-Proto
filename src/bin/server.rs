@@ -1,19 +1,20 @@
 use std::{
-    io::{prelude::*, BufReader},
-    net::TcpStream,
+    io::{prelude::*},
     sync::{Arc, Mutex},
 };
 
 use dialoguer::Input;
 
-use graphlog_proto::utils::http_server::HttpServer;
-use graphlog_proto::{types::log::Log, utils::http_server::ReidMessage};
 use graphlog_proto::{
     types::{
         common::{id_equal, Encodable, Id},
         reid::Reid,
+        log::Log
     },
-    utils::http_server::IdMessage,
+    utils::http_server::{
+        IdMessage,
+        ReidMessage,
+    },
 };
 
 use openssl::{
@@ -21,7 +22,18 @@ use openssl::{
     pkey::{PKey, Public},
 };
 
-fn main() {
+use axum::{
+    extract::{Path, State, Json},
+    routing::{get, post},
+    http::StatusCode,
+    serve,
+    Router,
+};
+
+use tokio::net::TcpListener;
+
+#[tokio::main]
+async fn main() {
     let addr_port: String = Input::new()
         .with_prompt("Enter IP address to bind to")
         .default(String::from("127.0.0.1:7878"))
@@ -33,143 +45,67 @@ fn main() {
         .interact_text()
         .ok()
         .filter(|s: &String| !s.trim().is_empty());
+
     // TODO make this cleaner, I know there is a much better way
     // organize this code, probably change log.rs too
+    let mut log: Arc<Mutex<Log<Reid>>>;
     if let Some(path) = persist_file {
-        let log = Arc::new(Mutex::new(Log::new_from_file(path)));
-        let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
-        http_server.run(log);
+        log = Arc::new(Mutex::new(Log::new_from_file(path)));
     } else {
-        let log = Arc::new(Mutex::new(Log::new(persist_file)));
-        let mut http_server = HttpServer::new(addr_port, 1, Arc::new(handle_connection));
-        http_server.run(log);
+        log = Arc::new(Mutex::new(Log::new(persist_file)));
     }
+
+    // Endpoints
+    // /publish => post request, server receives a base64 encode reid
+    // /tail => get request, server sends the reid at the end of the log
+    // /tail_{num} => get request, retrieves most recent and num-1 reids before it
+    //             => speical case for tail_all try to get all the log
+    //             => will need some way to quantify stailness to tell the client
+    // /{id} => get request, server attempts to look up reid at
+    let app = Router::new()
+        .route("/publish", post(publish)).with_state(log)
+        .route("/tail", get(tail))
+        .route("/tail_{num}", get(tail_num))
+        .route("/{id}", get(lookup)).with_state(log);
+
+    let listener = TcpListener::bind(addr_port)
+        .await
+        .unwrap();
+    serve(listener, app).await.unwrap();
 }
 
-fn handle_connection(mut stream: TcpStream, log: Arc<Mutex<Log<Reid>>>) {
-    let mut buf_reader = BufReader::new(&stream);
-    let mut request_header: Vec<String> = Vec::new();
-    loop {
-        let mut header_line = String::new();
-        if let Err(why) = buf_reader.read_line(&mut header_line) {
-            println!("Couldn't read line in http header: {why}");
-            return;
-        }
-
-        if header_line == "\r\n" {
-            break;
-        }
-        header_line = header_line.strip_suffix("\r\n").unwrap().to_string();
-        request_header.push(header_line);
-    }
-    // println!("{request_header:#?}"); // For debug purposes
-    let request_type: &String = request_header.first().unwrap();
-    if *request_type == "POST / HTTP/1.1" {
-        println!("received post request at / (append reid to log)");
-        _post_reid(request_header, buf_reader, log);
-        let response = "HTTP/1.1 200 OK\r\n\r\n";
-        stream.write_all(response.as_bytes()).unwrap();
-    } else if request_type == "GET /tail HTTP/1.1" {
-        println!("Received get request at  /tail");
-        let response: String = _get_tail(log);
-        stream.write_all(response.as_bytes()).unwrap();
-    } else if request_type == "POST /look_up HTTP/1.1" {
-        if let Some(response) = _post_lookup(request_header, buf_reader, log) {
-            stream.write_all(response.as_bytes()).unwrap();
-        } else {
-            let response = "HTTP/1.1 200 OK\r\n\r\n";
-            stream.write_all(response.as_bytes()).unwrap();
-        }
-    } else if request_type == "GET /head HTTP/1.1" {
-        let reid_b64: String = log.lock().unwrap().tail().clone().encode();
-        let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
-        let response: String = format!(
-            "HTTP/1.1 200 OK\r\n
-             Content-Type: application/json\r\n
-             Content-Length: {}\r\n
-             Connection: close\r\n
-             \r\n
-             {}",
-            response_body.len(),
-            response_body,
-        );
-        stream.write_all(response.as_bytes()).unwrap();
-    } else {
-        println!("No handler for request: {request_type:#?}");
-        let response = "HTTP/1.1 200 OK\r\n\r\n";
-        stream.write_all(response.as_bytes()).unwrap();
-    }
-}
-
-fn _post_reid(
-    request: Vec<String>,
-    mut buf_reader: BufReader<&TcpStream>,
-    log: Arc<Mutex<Log<Reid>>>,
+async fn publish(
+    State(log): State<Arc<Mutex<Log<Reid>>>>,
+    Json(reid_msg): Json<ReidMessage>,
 ) {
-    let content_size: usize = match request.iter().find(|s| s.contains("Content-Length: ")) {
-        Some(found) => found
-            .strip_prefix("Content-Length: ")
-            .unwrap()
-            .parse::<usize>()
-            .unwrap(),
-        None => {
-            println!("Couldn't find content size in request header");
-            return;
-        }
-    };
-    let content_type: String = match request.iter().find(|s| s.contains("Content-Type: ")) {
-        Some(found) => found.strip_prefix("Content-Type: ").unwrap().to_string(),
-        None => {
-            println!("Couldn't find content-type in request header");
-            return;
-        }
-    };
-    let mut content_raw = vec![0u8; content_size];
-    if let Err(why) = buf_reader.read_exact(&mut content_raw) {
-        println!("Error reading request buffer: {why}");
-        return;
+    let reid: Reid = reid_msg.reid;
+    let pubk_str: String = reid_msg.pub_key;
+    let pubk: PKey<Public> = PKey::public_key_from_pem(pubk_str.as_bytes()).unwrap();
+    if reid.verify_sig(&pubk) {
+        log.lock().unwrap().append(reid);
+        println!("Pushed reid to log");
     }
-    let content_str: String = match String::from_utf8(content_raw) {
-        Err(why) => {
-            println!("Error parsing content string: {why}");
-            return;
-        }
-        Ok(string) => string,
-    };
-    if content_type == "application/json" {
-        let reid_json: ReidMessage = serde_json::from_str(&content_str).unwrap();
-        let pubk_b64: String = reid_json.pubk;
-        let pubk_raw = String::from_utf8(decode_block(&pubk_b64).unwrap()).unwrap();
-        let pubk: PKey<Public> = PKey::public_key_from_pem(pubk_raw.as_bytes()).unwrap();
-        let reid_b64: String = reid_json.reid;
-        let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
-        let mut reid: Reid = serde_json::from_str(&reid_raw).unwrap();
-        if reid.verify_sig(&pubk) {
-            log.lock().unwrap().append(reid);
-            println!("Pushed reid to log");
-        } else {
-            println!("Couldn't verify signature, not appending to log");
-        }
-    } else {
-        println!("Recieved content_type: {content_type} that is not yet handled");
+    else {
+        println!("Could not verify signature");
     }
 }
 
-fn _get_tail(log: Arc<Mutex<Log<Reid>>>) -> String {
-    let reid_b64: String = log.lock().unwrap().head().clone().encode();
-    let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
-    format!(
-        "HTTP/1.1 200 OK\r\n\nContent-Type: application/json\r\n\nContent-Length: {}\r\n\nConnection: close\r\n\n\r\n\n{}",
-        response_body.len(),
-        response_body,
-    )
+
+async fn tail(State(log): State<Arc<Mutex<Log<Reid>>>>) -> Reid {
+    log.lock().unwrap().tail().clone()
 }
 
-fn _post_lookup(
-    request: Vec<String>,
-    mut buf_reader: BufReader<&TcpStream>,
-    log: Arc<Mutex<Log<Reid>>>,
-) -> Option<String> {
+async fn tail_num(Path(num): Path<String>, State(log): State<Arc<Mutex<Log<Reid>>>>) -> Vec<Reid> {
+    if num == "all" {
+        panic!("Send entire log not implemented");
+    }
+   log.lock().unwrap().tailn(num.parse().expect("Couldn't convert to usize"))
+}
+
+async fn lookup(
+    Path(id): Path<String>,
+    State(log): State<Arc<Mutex<Log<Reid>>>>,
+) -> String {
     let content_size: usize = match request.iter().find(|s| s.contains("Content-Length: ")) {
         Some(found) => found
             .strip_prefix("Content-Length: ")
@@ -237,8 +173,4 @@ fn _post_lookup(
             response_body,
         ))
     }
-}
-
-fn _get_head(request: Vec<String>, log: Arc<Mutex<Log<Reid>>>) -> String {
-    String::new()
 }
