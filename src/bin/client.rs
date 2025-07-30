@@ -1,13 +1,12 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
-use curl::easy::{Easy, List};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Input;
-use graphlog_proto::types::common::{
-    AnchorType, ClaimType, ClientConfig, Config, Encodable, Key, KeyType,
-};
+use graphlog_proto::types::common::{AnchorType, ClaimType, ClientConfig, Config, Key, KeyType};
 use graphlog_proto::types::reid::Reid;
+use graphlog_proto::utils::http_server::ReidMessage;
 use openssl::pkey::{Id, PKey, Private, Public};
+use reqwest::{Client, StatusCode};
 use std::panic;
 use std::{
     env, fs,
@@ -65,9 +64,11 @@ enum Commands {
         #[arg(short, long)]
         log_addr: Option<String>,
     },
+    // TODO add tail and tail_num
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli: Cli = Cli::parse();
     let home_dir: PathBuf = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE")) // windows
@@ -225,7 +226,12 @@ fn load_private_key_from_file(prvk_path: PathBuf) -> PKey<Private> {
 }
 
 // Business functions that do stuff
-fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Config, cli: Cli) {
+async fn parse_and_execute(
+    pub_key: PKey<Public>,
+    prv_key: PKey<Private>,
+    config: Config,
+    cli: Cli,
+) {
     // TODO eventually load all of the reid anchor and claims from the config file here
     let client_config: ClientConfig = config.client_conf.unwrap();
     let expiration: DateTime<Utc> = client_config.expiration;
@@ -244,9 +250,9 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
             };
 
             if let Some(log_addr) = log_addr {
-                publish_reid(log_addr, &reid, pem_str);
+                publish_reid(log_addr, reid, pem_str).await;
             } else {
-                publish_reid(client_config.log_addr, &reid, pem_str);
+                publish_reid(client_config.log_addr, reid, pem_str).await;
             }
         }
         Some(Commands::AppendClaim {
@@ -283,7 +289,8 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 client_config,
                 publish.unwrap_or_default(),
                 pem_str,
-            );
+            )
+            .await;
         }
         Some(Commands::AppendAnchor {
             anchor_type,
@@ -305,13 +312,14 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
                 client_config,
                 publish.unwrap_or_default(),
                 pem_str,
-            );
+            )
+            .await;
         }
         Some(Commands::LookupReid { id, log_addr }) => {
             if let Some(log_addr) = log_addr {
-                look_up_reid(log_addr, id);
+                look_up_reid(log_addr, id).await;
             } else {
-                look_up_reid(client_config.log_addr, id);
+                look_up_reid(client_config.log_addr, id).await;
             }
         }
         Some(Commands::Revoke { log_addr }) => {
@@ -326,9 +334,9 @@ fn parse_and_execute(pub_key: PKey<Public>, prv_key: PKey<Private>, config: Conf
             };
 
             if let Some(log_addr) = log_addr {
-                publish_reid(log_addr, &reid, pem_str);
+                publish_reid(log_addr, reid, pem_str).await
             } else {
-                publish_reid(client_config.log_addr, &reid, pem_str);
+                publish_reid(client_config.log_addr, reid, pem_str).await
             }
         }
         None => {
@@ -356,7 +364,7 @@ fn _parse_datetime(input: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-fn append_claim(
+async fn append_claim(
     claim_type: ClaimType,
     claim_value: Key,
     mut reid: Reid,
@@ -371,11 +379,11 @@ fn append_claim(
         .unwrap()
         .push((claim_type, claim_value));
     if publish {
-        publish_reid(log_addr, &reid, pem_str);
+        publish_reid(log_addr, reid, pem_str).await;
     }
 }
 
-fn append_anchor(
+async fn append_anchor(
     anchor_type: AnchorType,
     anchor_value: String,
     mut reid: Reid,
@@ -389,98 +397,68 @@ fn append_anchor(
         .anchors
         .unwrap()
         .push((anchor_type, anchor_value));
+
     if publish {
-        publish_reid(log_addr, &reid, pem_str);
+        publish_reid(log_addr, reid, pem_str).await;
     }
 }
 
-fn publish_reid(log_addr: String, reid: &Reid, pem_str: String) {
-    // set Url
-    let mut easy = Easy::new();
-    let endpoint: String = format!("http://{log_addr}");
-    easy.url(&endpoint).unwrap();
-
-    // Set Headers
-    let mut headers = List::new();
-    headers.append("User-Agent: curl/8.14.1").unwrap();
-    headers.append("Content-Type: application/json").unwrap();
-    easy.http_headers(headers).unwrap();
-
-    // Set POST data
-    let data = format!(
-        "{{\"reid\": \"{}\", \"pubk\": \"{}\"}}",
-        reid.clone().encode(),
-        pem_str
-    );
-    // Note, this copies data into libcurl internal
-    // buffer so we may want use easy.post_field_size()
-    // and Read implementation - ChatGPT. Though I think
-    // that they data that we are sending around is
-    easy.post_fields_copy(data.as_bytes()).unwrap();
-
-    // Perform request
-    easy.perform().unwrap();
-
-    // check response code
-    let response_code = easy.response_code().unwrap();
-    println!("Response code: {response_code}");
+async fn publish_reid(log_addr: String, reid: Reid, pem_str: String) {
+    let client = Client::new();
+    let endpoint: String = format!("http://{log_addr}/publish");
+    let res = client
+        .post(endpoint)
+        .json(&ReidMessage {
+            reid,
+            pub_key: pem_str,
+        })
+        .send()
+        .await
+        .unwrap();
+    match res.status() {
+        StatusCode::OK => println!("Successful append reid"),
+        StatusCode::NOT_ACCEPTABLE => println!("Log server could not verify certificate"),
+        code => println!("Unexpected status code: {code}"),
+    }
 }
 
-fn get_tail(log_addr: String) {
-    // Set Url
-    let mut easy = Easy::new();
+async fn get_tail(log_addr: String) {
+    let client = Client::new();
     let endpoint: String = format!("http://{log_addr}/tail");
-    easy.url(&endpoint).unwrap();
+    let res = client.get(endpoint).send().await.unwrap();
 
-    // Set Headers
-    let mut headers = List::new();
-    headers.append("User-Agent: curl/8.14.1").unwrap();
-    headers.append("Content-Type: application/json").unwrap();
-    easy.http_headers(headers).unwrap();
-
-    easy.write_function(|data| {
-        let response: Vec<String> = _format_get(data);
-        let reid = Reid::new_from_header(response);
-        println!("{}", reid.unwrap());
-        Ok(data.len())
-    })
-    .unwrap();
-    easy.perform().unwrap();
+    let status: StatusCode = res.status();
+    if status.is_success() {
+        match res.json::<Reid>().await {
+            Ok(reid) => {
+                println!("Received reid: {reid}");
+            }
+            Err(why) => {
+                println!("Failed to parse json: {why}");
+            }
+        };
+    } else {
+        println!("Get tail request failed with status {status}");
+    }
 }
 
-fn look_up_reid(log_addr: String, id_b64: String) {
-    // set Url
-    let mut easy = Easy::new();
-    let endpoint: String = format!("http://{log_addr}/look_up");
-    easy.url(&endpoint).unwrap();
+async fn look_up_reid(log_addr: String, id_b64: String) {
+    let client = Client::new();
+    let endpoint: String = format!("http://{log_addr}/{id_b64}");
+    let res = client.get(endpoint).send().await.unwrap();
 
-    // Set Headers
-    let mut headers = List::new();
-    headers.append("User-Agent: curl/8.14.1").unwrap();
-    headers.append("Content-Type: application/json").unwrap();
-    easy.http_headers(headers).unwrap();
+    let status: StatusCode = res.status();
 
-    // Set POST data
-    let data = format!("{{\"id_b64\": \"{id_b64}\"}}");
-    // Note, this copies data into libcurl internal
-    // buffer so we may want use easy.post_field_size()
-    // and Read implementation - ChatGPT. Though I think
-    // that they data that we are sending around is
-    easy.post_fields_copy(data.as_bytes()).unwrap();
-
-    easy.write_function(|data| {
-        let response: Vec<String> = _format_get(data);
-        let reid = Reid::new_from_header(response);
-        println!("{}", reid.unwrap());
-        Ok(data.len())
-    })
-    .unwrap();
-    // Perform request
-    easy.perform().unwrap();
-}
-
-fn _format_get(raw: &[u8]) -> Vec<String> {
-    let raw_vec: Vec<u8> = raw.to_vec();
-    let raw_str: String = String::from_utf8(raw_vec).unwrap();
-    raw_str.split("\r\n\n").map(|s| s.to_string()).collect()
+    if status.is_success() {
+        match res.json::<Reid>().await {
+            Ok(reid) => {
+                println!("Received reid: {reid}");
+            }
+            Err(why) => {
+                println!("Failed to parse json: {why}");
+            }
+        };
+    } else {
+        println!("Look up of reid {id_b64} failed: {status}");
+    }
 }

@@ -71,16 +71,17 @@ impl<T> Log<T> {
         self.persist(); // TODO THIS IS TEMPORARY IN FUTURE PERSIST ON BATCH;
     }
 
-    pub fn head(&mut self) -> &T {
-        self._log.first().unwrap()
+    pub fn head(&mut self) -> Option<&T> {
+        self._log.first()
     }
 
-    pub fn tail(&self) -> &T {
-        self._log.last().unwrap()
+    pub fn tail(&self) -> Option<&T> {
+        self._log.last()
     }
 
-    pub fn tailn(&self, n: usize) -> Vec<T> 
-    where T: Clone
+    pub fn tailn(&self, n: usize) -> Vec<T>
+    where
+        T: Clone,
     {
         let len: usize = self._log.len();
         let start = len.saturating_sub(n);

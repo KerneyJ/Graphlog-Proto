@@ -1,11 +1,11 @@
 use super::threadpool::ThreadPool;
 use crate::types::log::Log;
 use crate::types::reid::Reid;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ReidMessage {
     pub reid: Reid,
     pub pub_key: String,

@@ -1,20 +1,14 @@
-use std::{
-    io::{prelude::*},
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use dialoguer::Input;
 
 use graphlog_proto::{
     types::{
-        common::{id_equal, Encodable, Id},
+        common::{id_equal, Id},
+        log::Log,
         reid::Reid,
-        log::Log
     },
-    utils::http_server::{
-        IdMessage,
-        ReidMessage,
-    },
+    utils::http_server::ReidMessage,
 };
 
 use openssl::{
@@ -23,11 +17,10 @@ use openssl::{
 };
 
 use axum::{
-    extract::{Path, State, Json},
-    routing::{get, post},
+    extract::{Json, Path, State},
     http::StatusCode,
-    serve,
-    Router,
+    routing::{get, post},
+    serve, Router,
 };
 
 use tokio::net::TcpListener;
@@ -48,7 +41,7 @@ async fn main() {
 
     // TODO make this cleaner, I know there is a much better way
     // organize this code, probably change log.rs too
-    let mut log: Arc<Mutex<Log<Reid>>>;
+    let log: Arc<Mutex<Log<Reid>>>;
     if let Some(path) = persist_file {
         log = Arc::new(Mutex::new(Log::new_from_file(path)));
     } else {
@@ -63,114 +56,80 @@ async fn main() {
     //             => will need some way to quantify stailness to tell the client
     // /{id} => get request, server attempts to look up reid at
     let app = Router::new()
-        .route("/publish", post(publish)).with_state(log)
+        .route("/publish", post(publish))
+        .with_state(Arc::clone(&log))
         .route("/tail", get(tail))
+        .with_state(Arc::clone(&log))
         .route("/tail_{num}", get(tail_num))
-        .route("/{id}", get(lookup)).with_state(log);
+        .with_state(Arc::clone(&log))
+        .route("/{id}", get(lookup))
+        .with_state(Arc::clone(&log));
 
-    let listener = TcpListener::bind(addr_port)
-        .await
-        .unwrap();
+    let listener = TcpListener::bind(addr_port).await.unwrap();
     serve(listener, app).await.unwrap();
 }
 
 async fn publish(
     State(log): State<Arc<Mutex<Log<Reid>>>>,
     Json(reid_msg): Json<ReidMessage>,
-) {
+) -> StatusCode {
     let reid: Reid = reid_msg.reid;
     let pubk_str: String = reid_msg.pub_key;
     let pubk: PKey<Public> = PKey::public_key_from_pem(pubk_str.as_bytes()).unwrap();
     if reid.verify_sig(&pubk) {
         log.lock().unwrap().append(reid);
         println!("Pushed reid to log");
-    }
-    else {
+        StatusCode::OK
+    } else {
         println!("Could not verify signature");
+        StatusCode::NOT_ACCEPTABLE
     }
 }
 
-
-async fn tail(State(log): State<Arc<Mutex<Log<Reid>>>>) -> Reid {
-    log.lock().unwrap().tail().clone()
+async fn tail(
+    State(log): State<Arc<Mutex<Log<Reid>>>>,
+) -> Result<Json<Reid>, (StatusCode, String)> {
+    match log.lock().unwrap().tail() {
+        Some(entry) => Ok(Json(entry.clone())),
+        None => Err((StatusCode::NO_CONTENT, "Empty log".to_string())),
+    }
 }
 
-async fn tail_num(Path(num): Path<String>, State(log): State<Arc<Mutex<Log<Reid>>>>) -> Vec<Reid> {
+async fn tail_num(
+    Path(num): Path<String>,
+    State(log): State<Arc<Mutex<Log<Reid>>>>,
+) -> Result<Json<Vec<Reid>>, (StatusCode, String)> {
     if num == "all" {
-        panic!("Send entire log not implemented");
+        Err((StatusCode::NO_CONTENT, "all not implemented".to_string()))
+    } else {
+        Ok(Json(
+            log.lock()
+                .unwrap()
+                .tailn(num.parse().expect("Couldn't convert to usize")),
+        ))
     }
-   log.lock().unwrap().tailn(num.parse().expect("Couldn't convert to usize"))
 }
 
 async fn lookup(
-    Path(id): Path<String>,
+    Path(id_b64): Path<String>,
     State(log): State<Arc<Mutex<Log<Reid>>>>,
-) -> String {
-    let content_size: usize = match request.iter().find(|s| s.contains("Content-Length: ")) {
-        Some(found) => found
-            .strip_prefix("Content-Length: ")
-            .unwrap()
-            .parse::<usize>()
-            .unwrap(),
+) -> Result<Json<Reid>, (StatusCode, String)> {
+    let id: Id = decode_block(&id_b64).unwrap();
+    match log
+        .lock()
+        .unwrap()
+        .search(|x: &Reid| id_equal(x.get_id(), id.clone()))
+    {
         None => {
-            println!("Couldn't find content size in request header");
-            return None;
+            println!("Could not find reid with id");
+            Err((
+                StatusCode::NO_CONTENT,
+                format!("Failed to find Reid with id: {id_b64}"),
+            ))
         }
-    };
-    let content_type: String = match request.iter().find(|s| s.contains("Content-Type: ")) {
-        Some(found) => found.strip_prefix("Content-Type: ").unwrap().to_string(),
-        None => {
-            println!("Couldn't find content-type in request header");
-            return None;
+        Some(reid) => {
+            println!("Found reid with id: {id_b64}");
+            Ok(Json(reid.clone()))
         }
-    };
-    let mut content_raw = vec![0u8; content_size];
-    if let Err(why) = buf_reader.read_exact(&mut content_raw) {
-        println!("Error reading request buffer: {why}");
-        return None;
-    }
-    let content_str: String = match String::from_utf8(content_raw) {
-        Err(why) => {
-            println!("Error parsing content string: {why}");
-            return None;
-        }
-        Ok(string) => string,
-    };
-    if content_type == "application/json" {
-        let id_json: IdMessage = serde_json::from_str(&content_str).unwrap();
-        let id_b64: String = id_json.id_b64;
-        let id: Id = decode_block(&id_b64).unwrap();
-        match log
-            .lock()
-            .unwrap()
-            .search(|x: &Reid| id_equal(x.get_id(), id.clone()))
-        {
-            None => {
-                println!("Could not find reid with id");
-                let response_body = "{\"reid\": \"null\"}";
-                Some(format!(
-                    "HTTP/1.1 200 OK\r\n\nContent-Type: application/json\r\n\nContent-Length: {}\r\n\nConnection: close\r\n\n\r\n\n{}",
-                    response_body.len(),
-                    response_body,
-                ))
-            }
-            Some(reid) => {
-                let reid_b64: String = reid.encode();
-                let response_body = format!("{{\"reid\": \"{reid_b64}\"}}");
-                Some(format!(
-                    "HTTP/1.1 200 OK\r\n\nContent-Type: application/json\r\n\nContent-Length: {}\r\n\nConnection: close\r\n\n\r\n\n{}",
-                    response_body.len(),
-                    response_body,
-                ))
-            }
-        }
-    } else {
-        println!("Received content_type: {content_type} that is not yet handled");
-        let response_body = "{\"reid\": \"null\"}";
-        Some(format!(
-            "HTTP/1.1 200 OK\r\n\nContent-Type: application/json\r\n\nContent-Length: {}\r\n\nConnection: close\r\n\n\r\n\n{}",
-            response_body.len(),
-            response_body,
-        ))
     }
 }
