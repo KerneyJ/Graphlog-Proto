@@ -21,6 +21,7 @@ pub trait Decodable<T> {
 pub enum ClaimType {
     SSHKEY,
     X509,
+    WGKEY, // Wireguard Key
 }
 
 impl fmt::Display for ClaimType {
@@ -31,6 +32,9 @@ impl fmt::Display for ClaimType {
             }
             Self::X509 => {
                 writeln!(f, "X.509").unwrap();
+            }
+            Self::WGKEY => {
+                writeln!(f, "Wireguard Key").unwrap();
             }
         }
         Ok(())
