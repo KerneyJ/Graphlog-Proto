@@ -1,5 +1,4 @@
 use crate::types::common::KeyType;
-use crate::utils::http_server::ReidMessage;
 
 use super::common::{Encodable, Decodable, Id, Key, Sig, AnchorType, ClaimType};
 use chrono::serde::ts_seconds;

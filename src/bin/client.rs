@@ -89,14 +89,14 @@ async fn main() {
             Err(why) => panic!("Error loading toml: {why}"),
             Ok(config) => config,
         };
-        parse_and_execute(pub_key, prv_key, config, cli);
+        parse_and_execute(pub_key, prv_key, config, cli).await;
     } else {
         // Create key and config stuff
         if let Err(why) = fs::create_dir_all(&graphlog_dir) {
             panic!("Directory does not exist and failed to create: {why}");
         }
         let (pub_key, prv_key, conf) = config_init(&graphlog_dir);
-        parse_and_execute(pub_key, prv_key, conf, cli);
+        parse_and_execute(pub_key, prv_key, conf, cli).await;
     }
 }
 
