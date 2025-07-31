@@ -86,32 +86,32 @@ async fn main() {
         // Load from the config file
         let pubk_path: PathBuf = graphlog_dir.join("graphlog-pub.key");
         let prvk_path: PathBuf = graphlog_dir.join("graphlog-prv.key");
-        let conf_path: PathBuf = graphlog_dir.join("graphlog.toml");
+        let config_path: PathBuf = graphlog_dir.join("graphlog.toml");
 
         let (pub_key, prv_key) = extract_keys_from_file(pubk_path, prvk_path);
-        let toml_str = fs::read_to_string(conf_path).unwrap();
+        let toml_str = fs::read_to_string(config_path.clone()).unwrap();
         let config: Config = match toml::from_str(&toml_str) {
             Err(why) => panic!("Error loading toml: {why}"),
             Ok(config) => config,
         };
-        parse_and_execute(pub_key, prv_key, config, cli).await;
+        parse_and_execute(pub_key, prv_key, config, cli, config_path).await;
     } else {
         // Create key and config stuff
         if let Err(why) = fs::create_dir_all(&graphlog_dir) {
             panic!("Directory does not exist and failed to create: {why}");
         }
-        let (pub_key, prv_key, conf) = config_init(&graphlog_dir);
-        parse_and_execute(pub_key, prv_key, conf, cli).await;
+        let (pub_key, prv_key, config, config_path) = config_init(&graphlog_dir);
+        parse_and_execute(pub_key, prv_key, config, cli, config_path).await;
     }
 }
 
 // Initial config functions
-fn config_init(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>, Config) {
+fn config_init(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>, Config, PathBuf) {
     // create keys
     let (pub_key, prv_key) = gen_keys(graphlog_dir);
     // Input for what will be placed in the config file
-    let config = gen_config_file(graphlog_dir);
-    (pub_key, prv_key, config)
+    let (config, path) = gen_config_file(graphlog_dir);
+    (pub_key, prv_key, config, path)
 }
 
 fn gen_keys(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>) {
@@ -149,7 +149,7 @@ fn gen_keys(graphlog_dir: &Path) -> (PKey<Public>, PKey<Private>) {
     (pub_key, prv_key)
 }
 
-fn gen_config_file(graphlog_dir: &Path) -> Config {
+fn gen_config_file(graphlog_dir: &Path) -> (Config, PathBuf) {
     let config_path = graphlog_dir.join("graphlog.toml");
     let log_addr: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("Enter a log address")
@@ -186,7 +186,7 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
     };
 
     save_config(&config, &config_path);
-    config
+    (config, config_path)
 }
 
 fn save_config(config: &Config, config_path: &Path) {
@@ -240,6 +240,7 @@ async fn parse_and_execute(
     prv_key: PKey<Private>,
     config: Config,
     cli: Cli,
+    config_path: PathBuf,
 ) {
     // TODO eventually load all of the reid anchor and claims from the config file here
     let client_config: ClientConfig = config.client_conf.unwrap();
@@ -309,7 +310,7 @@ async fn parse_and_execute(
             };
 
             let claim_value: Key = (claim_key_type, claim_key_str);
-            append_claim(
+            let client_config: ClientConfig = append_claim(
                 claim_type,
                 claim_value,
                 reid,
@@ -318,6 +319,8 @@ async fn parse_and_execute(
                 pem_str,
             )
             .await;
+            let new_config = Config { server_conf: config.server_conf, client_conf: Some(client_config) };
+            save_config(&new_config, &config_path);
         }
         Some(Commands::AppendAnchor {
             anchor_type,
@@ -332,7 +335,7 @@ async fn parse_and_execute(
                 Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
                 Ok(str) => str,
             };
-            append_anchor(
+            let client_config: ClientConfig = append_anchor(
                 anchor_type,
                 anchor_value,
                 reid,
@@ -341,6 +344,8 @@ async fn parse_and_execute(
                 pem_str,
             )
             .await;
+            let new_config = Config { server_conf: config.server_conf, client_conf: Some(client_config) };
+            save_config(&new_config, &config_path);
         }
         Some(Commands::LookupReid { id, log_addr }) => {
             if let Some(log_addr) = log_addr {
@@ -402,39 +407,56 @@ async fn append_claim(
     claim_type: ClaimType,
     claim_value: Key,
     mut reid: Reid,
-    client_config: ClientConfig,
+    mut client_config: ClientConfig,
     publish: bool,
     pem_str: String,
-) {
+) -> ClientConfig {
     reid.append_claim(claim_type.clone(), claim_value.clone());
     let log_addr: String = client_config.log_addr.clone();
-    client_config
-        .claims
-        .unwrap()
-        .push((claim_type, claim_value));
+    if client_config.claims.is_none() {
+        let claims: Vec<(ClaimType, Key)> = vec![(claim_type, claim_value)];
+        client_config.claims = Some(claims);
+    } else {
+        client_config
+            .claims
+            .as_mut()
+            .unwrap()
+            .push((claim_type, claim_value));
+    }
+
     if publish {
         publish_reid(log_addr, reid, pem_str).await;
     }
+
+    client_config
 }
 
 async fn append_anchor(
     anchor_type: AnchorType,
     anchor_value: String,
     mut reid: Reid,
-    client_config: ClientConfig,
+    mut client_config: ClientConfig,
     publish: bool,
     pem_str: String,
-) {
+) -> ClientConfig {
     reid.append_anchor(anchor_type.clone(), anchor_value.clone());
     let log_addr: String = client_config.log_addr.clone();
-    client_config
-        .anchors
-        .unwrap()
-        .push((anchor_type, anchor_value));
+    if client_config.anchors.is_none() {
+        let anchors: Vec<(AnchorType, String)> = vec![(anchor_type, anchor_value)];
+        client_config.anchors = Some(anchors);
+    } else {
+        client_config
+            .anchors
+            .as_mut()
+            .unwrap()
+            .push((anchor_type, anchor_value));
+    }
 
     if publish {
         publish_reid(log_addr, reid, pem_str).await;
     }
+
+    client_config
 }
 
 async fn publish_reid(log_addr: String, reid: Reid, pem_str: String) {
