@@ -136,8 +136,9 @@ impl Reid {
         let key_value: &String = &key.1;
         if key.0 == KeyType::ED25519 {
             key_value.clone()
-        }
-        else {
+        } else if key.0 == KeyType::CHACHA20POLY1305 {
+            key_value.clone()
+        } else {
             println!("Displaying unsupported key type, using base64");
             encode_block(key_value.as_bytes())
         }

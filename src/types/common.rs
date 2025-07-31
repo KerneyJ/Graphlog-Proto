@@ -45,6 +45,7 @@ impl fmt::Display for ClaimType {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum KeyType {
     ED25519,
+    CHACHA20POLY1305,
 }
 
 impl fmt::Display for KeyType {
@@ -52,6 +53,9 @@ impl fmt::Display for KeyType {
         match &self {
             Self::ED25519 => {
                 writeln!(f, "ED25519").unwrap();
+            }
+            Self::CHACHA20POLY1305 => {
+                writeln!(f, "CHACHA20POLY1305").unwrap();
             }
         };
         Ok(())
