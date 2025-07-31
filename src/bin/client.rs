@@ -244,9 +244,11 @@ async fn parse_and_execute(
 ) {
     // TODO eventually load all of the reid anchor and claims from the config file here
     let client_config: ClientConfig = config.client_conf.unwrap();
+    let claims: Option<Vec<(ClaimType, Key)>> = client_config.claims.clone();
+    let anchors: Option<Vec<(AnchorType, String)>> = client_config.anchors.clone();
     let expiration: DateTime<Utc> = client_config.expiration;
     let mut reid: Reid =
-        Reid::new_with_keys(&pub_key, &prv_key, expiration, None, None, None, false);
+        Reid::new_with_keys(&pub_key, &prv_key, expiration, None, claims, anchors, false);
     match cli.command {
         Some(Commands::Publish { log_addr }) => {
             // get pem_str
