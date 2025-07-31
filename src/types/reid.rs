@@ -89,33 +89,7 @@ impl Reid {
             revoked,
         }
     }
-/* TODO REMOVE
-    pub fn new_from_header(header: Vec<String>) -> Option<Self> {
-        let content_type: String = match header.iter().find(|s| s.contains("Content-Type: ")) {
-            Some(found) => found.strip_prefix("Content-Type: ").unwrap().to_string(),
-            None => {
-                println!("Error Couldn't find content-type in request handler");
-                return None;
-            }
-        };
-        if content_type != "application/json" {
-            println!("Error received content of type for which there is no handler");
-            return None;
-        }
 
-        let content_str: &String = header.last().unwrap();
-        let reid_json: ReidMessage = serde_json::from_str(content_str).unwrap();
-        let reid_b64: String = reid_json.reid;
-        let reid_raw: String = String::from_utf8(decode_block(&reid_b64).unwrap()).unwrap();
-        match serde_json::from_str(&reid_raw) {
-            Err(why) => {
-                println!("Error deserializing reid json string: {why}");
-                None
-            }
-            Ok(reid) => reid,
-        }
-    }
-*/
     pub fn append_anchor(&mut self, anchor_type: AnchorType, anchor_value: String) {
         self.anchors
             .get_or_insert_with(Vec::new)
