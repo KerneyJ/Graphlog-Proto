@@ -185,11 +185,15 @@ fn gen_config_file(graphlog_dir: &Path) -> Config {
         server_conf: None,
     };
 
-    let toml_string: String = toml::to_string_pretty(&config).unwrap();
-    if let Err(why) = fs::write(config_path, toml_string) {
-        println!("Error writing generated config to file: {why}");
-    }
+    save_config(&config, &config_path);
     config
+}
+
+fn save_config(config: &Config, config_path: &Path) {
+    let toml_string: String = toml::to_string_pretty(config).unwrap();
+    if let Err(why) = fs::write(config_path, toml_string) {
+        println!("Error saving config to file: {why}");
+    }
 }
 
 fn extract_keys_from_file(pubk_path: PathBuf, prvk_path: PathBuf) -> (PKey<Public>, PKey<Private>) {
