@@ -283,32 +283,17 @@ async fn parse_and_execute(
                 Ok(str) => str,
             };
 
-            let claim_key_str: String = match claim_key_type {
-                KeyType::ED25519 => {
-                    let claim_pkey: PKey<Public> = load_public_key_from_file(claim_key_path);
-                    let claim_key_vec: Vec<u8> = match claim_pkey.public_key_to_pem() {
-                        Err(why) => panic!("Could not convert pub_key to pem format: {why}"),
-                        Ok(vec) => vec,
-                    };
-                    match String::from_utf8(claim_key_vec) {
-                        Err(why) => panic!("Couldn't convert pem vec to string: {why}"),
-                        Ok(str) => str,
-                    }
-                }
-                KeyType::CHACHA20POLY1305 => {
-                    let mut pubk_file = match File::open(claim_key_path) {
-                        Err(why) => panic!("Couldn't open public key file, reason: {why}"),
-                        Ok(pubk_file) => pubk_file,
-                    };
-                    let mut pubk_raw: Vec<u8> = Vec::new();
-                    if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
-                        panic!("Error reading public key file: {why}");
-                    };
-                    match String::from_utf8(pubk_raw) {
-                        Err(why) => panic!("Couldn't convert read key to string: {why}"),
-                        Ok(str) => str,
-                    }
-                }
+            let mut pubk_file = match File::open(claim_key_path) {
+                Err(why) => panic!("Couldn't open public key file, reason: {why}"),
+                Ok(pubk_file) => pubk_file,
+            };
+            let mut pubk_raw: Vec<u8> = Vec::new();
+            if let Err(why) = pubk_file.read_to_end(&mut pubk_raw) {
+                panic!("Error reading public key file: {why}");
+            };
+            let claim_key_str  = match String::from_utf8(pubk_raw) {
+                Err(why) => panic!("Couldn't convert read key to string: {why}"),
+                Ok(str) => str,
             };
 
             let claim_value: Key = (claim_key_type, claim_key_str);
